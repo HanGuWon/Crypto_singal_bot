@@ -1,0 +1,105 @@
+from __future__ import annotations
+
+from html import escape
+from typing import Any
+
+from crypto_signal_bot.alerts.schemas import AlertEvent
+
+RESEARCH_WARNING = "Research alert only. Not financial advice. No order was placed."
+FORBIDDEN_ALERT_WORDS = [
+    "buy now",
+    "guaranteed",
+    "sure profit",
+    "pump",
+    "moon",
+    "entry signal",
+    "take profit",
+    "leverage",
+    "all-in",
+    "urgent buy",
+]
+
+
+def validate_safe_message(text: str) -> None:
+    lowered = text.lower()
+    for word in FORBIDDEN_ALERT_WORDS:
+        if word in lowered:
+            raise ValueError(f"Forbidden alert wording detected: {word}")
+
+
+def format_telegram_event(event: AlertEvent, *, max_length: int = 4096) -> str:
+    drivers = ", ".join(event.drivers[:5]) or "mixed_evidence"
+    risks = ", ".join(event.risk_flags[:5]) or "none"
+    rank = f"#{event.rank}" if event.rank is not None else "n/a"
+    price = f"{event.current_price:.8g}" if event.current_price is not None else "n/a"
+    lines = [
+        f"<b>{escape(event.exchange.upper())} {escape(event.symbol)}</b> {escape(event.interval)}",
+        f"Event: {escape(event.event_type)} | Severity: {escape(event.severity)}",
+        f"Score: {event.score:.1f} | Confidence: {escape(event.confidence)} | Rank: {rank}",
+        f"Price: {price}",
+        f"Drivers: {escape(drivers)}",
+        f"Risk flags: {escape(risks)}",
+        f"Invalidation: {escape(event.invalidation_condition)}",
+        f"Data timestamp UTC: {escape(event.data_timestamp_utc)}",
+        RESEARCH_WARNING,
+    ]
+    text = "\n".join(lines)
+    text = _truncate_preserving_warning(text, max_length=max_length)
+    validate_safe_message(text)
+    return text
+
+
+def format_discord_payload(
+    event: AlertEvent,
+    *,
+    username: str = "Crypto Signal Research Bot",
+    allow_mentions: bool = False,
+) -> dict[str, Any]:
+    fields = [
+        {"name": "Score", "value": f"{event.score:.1f} ({event.confidence})", "inline": True},
+        {"name": "Rank", "value": f"#{event.rank}" if event.rank is not None else "n/a", "inline": True},
+        {
+            "name": "Price",
+            "value": f"{event.current_price:.8g}" if event.current_price is not None else "n/a",
+            "inline": True,
+        },
+        {"name": "Drivers", "value": ", ".join(event.drivers[:5]) or "mixed_evidence"},
+        {"name": "Risk flags", "value": ", ".join(event.risk_flags[:5]) or "none"},
+        {"name": "Invalidation", "value": event.invalidation_condition},
+        {"name": "Data timestamp UTC", "value": event.data_timestamp_utc},
+    ]
+    description = RESEARCH_WARNING
+    validate_safe_message(description + " " + " ".join(field["value"] for field in fields))
+    payload: dict[str, Any] = {
+        "username": username,
+        "content": RESEARCH_WARNING,
+        "embeds": [
+            {
+                "title": f"{event.exchange.upper()} {event.symbol} {event.interval}",
+                "description": description,
+                "color": _severity_color(event.severity),
+                "fields": fields,
+            }
+        ],
+        "allowed_mentions": {"parse": ["users", "roles", "everyone"] if allow_mentions else []},
+    }
+    return payload
+
+
+def _truncate_preserving_warning(text: str, *, max_length: int) -> str:
+    if len(text) <= max_length:
+        return text
+    suffix = "\n" + RESEARCH_WARNING
+    available = max_length - len(suffix) - 3
+    if available < 0:
+        return RESEARCH_WARNING[:max_length]
+    return text[:available].rstrip() + "..." + suffix
+
+
+def _severity_color(severity: str) -> int:
+    return {
+        "INFO": 0x3498DB,
+        "WATCH": 0x2ECC71,
+        "WARNING": 0xF1C40F,
+        "CRITICAL": 0xE74C3C,
+    }.get(severity.upper(), 0x95A5A6)
