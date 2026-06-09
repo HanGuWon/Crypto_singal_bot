@@ -298,6 +298,8 @@ def _eligible_for_upside_alert(candidate: SignalCandidate) -> bool:
     return (
         candidate.is_closed_candle_signal
         and candidate.data_quality_status == "pass"
+        and candidate.symbol_health_status != "quarantined"
+        and candidate.benchmark_available
         and candidate.confidence != "low"
         and not has_critical_risk(candidate.risk_flags)
     )

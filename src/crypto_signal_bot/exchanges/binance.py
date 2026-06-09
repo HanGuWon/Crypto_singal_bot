@@ -47,7 +47,7 @@ class BinancePublicClient:
     def get_markets(self, quote: str = "USDT") -> list[MarketSymbol]:
         payload = self._get("/api/v3/exchangeInfo", params={}, weight=20)
         symbols = [parse_binance_symbol(item) for item in payload.get("symbols", [])]
-        return [symbol for symbol in symbols if symbol.quote_asset == quote and symbol.status == "TRADING"]
+        return [symbol for symbol in symbols if symbol.quote_asset == quote]
 
     def get_candles(self, symbol: str, interval: str = "5m", limit: int = 200) -> list[Candle]:
         payload = self._get(

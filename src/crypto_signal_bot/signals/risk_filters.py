@@ -10,6 +10,9 @@ CRITICAL_RISK_FLAGS = {
     "incomplete_current_candle",
     "low_liquidity",
     "wide_spread",
+    "symbol_quarantined",
+    "insufficient_history",
+    "inactive_market",
 }
 
 

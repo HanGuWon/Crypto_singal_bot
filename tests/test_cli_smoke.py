@@ -19,6 +19,9 @@ def test_cli_collect_and_rank_mock_json(tmp_path, monkeypatch, capsys) -> None: 
     assert payload["research_warning"].startswith("Research watchlist only")
     assert len(payload["candidates"]) <= 2
     assert "score" in payload["candidates"][0]
+    assert "symbol_health_status" in payload["candidates"][0]
+    assert "history_bars_available" in payload["candidates"][0]
+    assert "benchmark_available" in payload["candidates"][0]
 
 
 def test_cli_notify_skipped_when_disabled(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -26,3 +29,21 @@ def test_cli_notify_skipped_when_disabled(tmp_path, monkeypatch, capsys) -> None
     main(["collect", "--exchange", "upbit", "--quote", "KRW", "--interval", "5m", "--limit", "80", "--mock"])
     assert main(["rank", "--exchange", "upbit", "--quote", "KRW", "--interval", "5m", "--top", "2", "--notify"]) == 0
     assert "notifications skipped because they are disabled" in capsys.readouterr().out
+
+
+def test_cli_rank_marks_insufficient_history(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+    monkeypatch.setenv("MIN_HISTORY_BARS", "120")
+    assert main(
+        ["collect", "--exchange", "binance", "--quote", "USDT", "--interval", "5m", "--limit", "80", "--mock"]
+    ) == 0
+    assert main(
+        ["rank", "--exchange", "binance", "--quote", "USDT", "--interval", "5m", "--top", "1", "--format", "json"]
+    ) == 0
+
+    output = capsys.readouterr().out
+    payload_text = output[output.find("{") :]
+    candidate = json.loads(payload_text)["candidates"][0]
+    assert candidate["symbol_health_status"] == "quarantined"
+    assert candidate["quarantine_reason"] == "insufficient_history"
+    assert "insufficient_history" in candidate["risk_flags"]

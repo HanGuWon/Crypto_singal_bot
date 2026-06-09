@@ -38,6 +38,7 @@ def test_upgrade_from_pre_outbox_schema(tmp_path) -> None:
     store.validate_schema()
     assert _table_exists(db_path, "notification_outbox")
     assert _table_exists(db_path, "notification_channel_state")
+    assert _table_exists(db_path, "symbol_health")
 
 
 def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
@@ -49,6 +50,7 @@ def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
 
     store.validate_schema()
     assert _table_exists(db_path, "notification_channel_state")
+    assert _table_exists(db_path, "symbol_health")
 
 
 def test_failed_migration_rolls_back(tmp_path) -> None:

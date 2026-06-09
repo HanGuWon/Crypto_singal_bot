@@ -43,6 +43,8 @@ class Settings:
     min_quote_volume_binance_usdt: float = 2_000_000.0
     max_spread_bps: float = 30.0
     max_staleness_seconds: int = 1200
+    min_history_bars: int = 80
+    symbol_quarantine_minutes: int = 120
 
     notifications_enabled: bool = False
     telegram_enabled: bool = False
@@ -111,6 +113,8 @@ def load_settings() -> Settings:
         min_quote_volume_binance_usdt=float(_env("MIN_QUOTE_VOLUME_BINANCE_USDT", "2000000")),
         max_spread_bps=float(_env("MAX_SPREAD_BPS", "30")),
         max_staleness_seconds=int(_env("MAX_STALENESS_SECONDS", "1200")),
+        min_history_bars=int(_env("MIN_HISTORY_BARS", "80")),
+        symbol_quarantine_minutes=int(_env("SYMBOL_QUARANTINE_MINUTES", "120")),
         notifications_enabled=_parse_bool(_env("NOTIFICATIONS_ENABLED", "false")),
         telegram_enabled=_parse_bool(_env("TELEGRAM_ENABLED", "false")),
         telegram_bot_token=_env("TELEGRAM_BOT_TOKEN", ""),

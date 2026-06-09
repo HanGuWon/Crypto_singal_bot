@@ -21,6 +21,10 @@ class SignalCandidate:
     source_run_id: str
     is_closed_candle_signal: bool
     data_quality_status: str
+    symbol_health_status: str = "unknown"
+    quarantine_reason: str | None = None
+    history_bars_available: int = 0
+    benchmark_available: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +43,10 @@ class SignalCandidate:
             "source_run_id": self.source_run_id,
             "is_closed_candle_signal": self.is_closed_candle_signal,
             "data_quality_status": self.data_quality_status,
+            "symbol_health_status": self.symbol_health_status,
+            "quarantine_reason": self.quarantine_reason,
+            "history_bars_available": self.history_bars_available,
+            "benchmark_available": self.benchmark_available,
         }
 
     def with_rank(self, rank: int) -> SignalCandidate:

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from crypto_signal_bot.alerts.schemas import AlertEvent
-from crypto_signal_bot.data.models import Candle
+from crypto_signal_bot.data.models import Candle, SymbolHealth
 
 
 class SchemaValidationError(RuntimeError):
@@ -153,6 +153,27 @@ CREATE INDEX IF NOT EXISTS idx_notification_channel_state_channel_hash
 ON notification_channel_state(channel, destination_hash);
 """
 
+SYMBOL_HEALTH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS symbol_health (
+  exchange TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  interval TEXT NOT NULL,
+  status TEXT NOT NULL,
+  first_seen_utc TEXT NOT NULL,
+  last_seen_utc TEXT NOT NULL,
+  last_good_candle_utc TEXT,
+  history_bars_available INTEGER NOT NULL,
+  quarantine_reason TEXT,
+  quarantine_until_utc TEXT,
+  benchmark_available INTEGER NOT NULL,
+  updated_at_utc TEXT NOT NULL,
+  PRIMARY KEY(exchange, symbol, interval)
+);
+
+CREATE INDEX IF NOT EXISTS idx_symbol_health_status
+ON symbol_health(exchange, interval, status, quarantine_until_utc);
+"""
+
 SCHEMA_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
   id INTEGER PRIMARY KEY,
@@ -169,6 +190,7 @@ def _split_sql_script(script: str) -> tuple[str, ...]:
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline_schema", _split_sql_script(SCHEMA)),
     Migration(2, "audit_indexes", _split_sql_script(INDEX_SCHEMA)),
+    Migration(3, "symbol_health", _split_sql_script(SYMBOL_HEALTH_SCHEMA)),
 )
 
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -254,6 +276,20 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "last_score",
         "last_dedupe_key",
     },
+    "symbol_health": {
+        "exchange",
+        "symbol",
+        "interval",
+        "status",
+        "first_seen_utc",
+        "last_seen_utc",
+        "last_good_candle_utc",
+        "history_bars_available",
+        "quarantine_reason",
+        "quarantine_until_utc",
+        "benchmark_available",
+        "updated_at_utc",
+    },
 }
 
 REQUIRED_INDEXES = {
@@ -261,6 +297,7 @@ REQUIRED_INDEXES = {
     "idx_alert_events_lookup",
     "idx_notification_outbox_status_created",
     "idx_notification_channel_state_channel_hash",
+    "idx_symbol_health_status",
 }
 
 
@@ -411,6 +448,65 @@ class SQLiteStore:
                 (exchange, interval, _quote_like(exchange, quote)),
             ).fetchall()
         return [str(row["symbol"]) for row in rows]
+
+    def upsert_symbol_health(self, health: SymbolHealth) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO symbol_health VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(exchange, symbol, interval) DO UPDATE SET
+                  status=excluded.status,
+                  last_seen_utc=excluded.last_seen_utc,
+                  last_good_candle_utc=excluded.last_good_candle_utc,
+                  history_bars_available=excluded.history_bars_available,
+                  quarantine_reason=excluded.quarantine_reason,
+                  quarantine_until_utc=excluded.quarantine_until_utc,
+                  benchmark_available=excluded.benchmark_available,
+                  updated_at_utc=excluded.updated_at_utc
+                """,
+                health.to_row(),
+            )
+
+    def get_symbol_health(self, exchange: str, symbol: str, interval: str) -> SymbolHealth | None:
+        self.init_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM symbol_health
+                WHERE exchange=? AND symbol=? AND interval=?
+                """,
+                (exchange, symbol, interval),
+            ).fetchone()
+        if row is None:
+            return None
+        return _row_to_symbol_health(row)
+
+    def list_symbol_health(
+        self,
+        exchange: str | None = None,
+        interval: str | None = None,
+        status: str | None = None,
+    ) -> list[SymbolHealth]:
+        self.init_schema()
+        sql = "SELECT * FROM symbol_health"
+        clauses: list[str] = []
+        params: list[object] = []
+        if exchange is not None:
+            clauses.append("exchange=?")
+            params.append(exchange)
+        if interval is not None:
+            clauses.append("interval=?")
+            params.append(interval)
+        if status is not None:
+            clauses.append("status=?")
+            params.append(status)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY exchange, symbol, interval"
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        return [_row_to_symbol_health(row) for row in rows]
 
     def insert_alert_event(self, event: object) -> None:
         self.init_schema()
@@ -822,6 +918,32 @@ def _row_to_candle(row: sqlite3.Row) -> Candle:
         quote_volume=None if row["quote_volume"] is None else float(row["quote_volume"]),
         trade_count=None if row["trade_count"] is None else int(row["trade_count"]),
         is_closed=bool(row["is_closed"]),
+    )
+
+
+def _row_to_symbol_health(row: sqlite3.Row) -> SymbolHealth:
+    return SymbolHealth(
+        exchange=str(row["exchange"]),
+        symbol=str(row["symbol"]),
+        interval=str(row["interval"]),
+        status=str(row["status"]),
+        first_seen_utc=datetime.fromisoformat(str(row["first_seen_utc"])),
+        last_seen_utc=datetime.fromisoformat(str(row["last_seen_utc"])),
+        last_good_candle_utc=(
+            None
+            if row["last_good_candle_utc"] is None
+            else datetime.fromisoformat(str(row["last_good_candle_utc"]))
+        ),
+        history_bars_available=int(row["history_bars_available"]),
+        quarantine_reason=(
+            None if row["quarantine_reason"] is None else str(row["quarantine_reason"])
+        ),
+        quarantine_until_utc=(
+            None
+            if row["quarantine_until_utc"] is None
+            else datetime.fromisoformat(str(row["quarantine_until_utc"]))
+        ),
+        benchmark_available=bool(row["benchmark_available"]),
     )
 
 

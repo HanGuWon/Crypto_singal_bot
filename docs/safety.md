@@ -19,6 +19,16 @@ The exchange safety guard uses explicit allowlists. Unknown endpoints are reject
 Private, account, execution, funding, deposit, and withdrawal paths are not part of the client
 interfaces.
 
+Data-quality quarantine:
+
+- Symbol health is stored locally for each exchange, symbol, and interval.
+- Stale candles, incomplete candles, invalid OHLCV, missing candles, warning or inactive markets,
+  and insufficient history are quarantined conservatively.
+- Quarantined symbols can remain visible as research candidates with risk flags, but they cannot
+  trigger upside alerts.
+- Missing benchmarks lower alert eligibility; this is a research-data-quality guard, not a market
+  prediction.
+
 Secrets:
 
 - No private exchange keys are needed.

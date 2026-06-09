@@ -28,6 +28,7 @@ AlertPolicy handles:
 - stale and failed-quality suppression
 - closed-candle only suppression
 - low-liquidity and wide-spread suppression
+- symbol quarantine and missing-benchmark suppression
 
 Dedupe, cooldown, and hysteresis:
 

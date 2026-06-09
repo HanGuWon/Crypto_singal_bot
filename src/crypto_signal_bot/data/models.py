@@ -124,3 +124,46 @@ class DataQualityReport:
     @property
     def passed(self) -> bool:
         return self.status == "pass"
+
+
+@dataclass(frozen=True)
+class SymbolHealth:
+    exchange: str
+    symbol: str
+    interval: str
+    status: str
+    first_seen_utc: datetime
+    last_seen_utc: datetime
+    last_good_candle_utc: datetime | None
+    history_bars_available: int
+    quarantine_reason: str | None
+    quarantine_until_utc: datetime | None
+    benchmark_available: bool
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "first_seen_utc", ensure_utc(self.first_seen_utc))
+        object.__setattr__(self, "last_seen_utc", ensure_utc(self.last_seen_utc))
+        if self.last_good_candle_utc is not None:
+            object.__setattr__(self, "last_good_candle_utc", ensure_utc(self.last_good_candle_utc))
+        if self.quarantine_until_utc is not None:
+            object.__setattr__(
+                self,
+                "quarantine_until_utc",
+                ensure_utc(self.quarantine_until_utc),
+            )
+
+    def to_row(self) -> tuple[Any, ...]:
+        return (
+            self.exchange,
+            self.symbol,
+            self.interval,
+            self.status,
+            self.first_seen_utc.isoformat(),
+            self.last_seen_utc.isoformat(),
+            None if self.last_good_candle_utc is None else self.last_good_candle_utc.isoformat(),
+            self.history_bars_available,
+            self.quarantine_reason,
+            None if self.quarantine_until_utc is None else self.quarantine_until_utc.isoformat(),
+            int(self.benchmark_available),
+            utc_now().isoformat(),
+        )

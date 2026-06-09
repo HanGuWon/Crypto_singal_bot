@@ -51,7 +51,7 @@ class UpbitPublicClient:
     def get_markets(self, quote: str = "KRW") -> list[MarketSymbol]:
         payload = self._get("/v1/market/all", params={"is_details": "true"}, group="market")
         markets = [parse_upbit_market(item) for item in payload]
-        return [market for market in markets if market.quote_asset == quote and market.status == "TRADING"]
+        return [market for market in markets if market.quote_asset == quote]
 
     def get_candles(self, symbol: str, interval: str = "5m", limit: int = 200) -> list[Candle]:
         unit = UPBIT_INTERVAL_UNITS.get(interval)

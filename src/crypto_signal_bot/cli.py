@@ -16,8 +16,10 @@ from crypto_signal_bot.alerts.rate_limit import SQLiteNotificationRateLimiter
 from crypto_signal_bot.alerts.state import SQLiteAlertStateStore
 from crypto_signal_bot.config import ConfigError, Settings, load_settings
 from crypto_signal_bot.data.collector import make_mock_candles
+from crypto_signal_bot.data.models import Candle, DataQualityReport, SymbolHealth
 from crypto_signal_bot.data.quality import assess_candles
 from crypto_signal_bot.data.store import SQLiteStore
+from crypto_signal_bot.data.symbol_health import assess_symbol_health
 from crypto_signal_bot.exchanges.base import PublicMarketDataClient
 from crypto_signal_bot.exchanges.binance import BinancePublicClient
 from crypto_signal_bot.exchanges.upbit import UpbitPublicClient
@@ -139,9 +141,24 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
     quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
     store = SQLiteStore(settings.database_path)
     if args.mock:
-        count = store.upsert_candles(
-            make_mock_candles(args.exchange, quote, args.interval, limit=args.limit)
-        )
+        mocked = make_mock_candles(args.exchange, quote, args.interval, limit=args.limit)
+        count = store.upsert_candles(mocked)
+        for symbol in sorted({candle.symbol for candle in mocked}):
+            candles = [candle for candle in mocked if candle.symbol == symbol]
+            quality = assess_candles(
+                candles,
+                args.interval,
+                max_staleness_seconds=settings.max_staleness_seconds,
+            )
+            _assess_and_store_symbol_health(
+                store,
+                args.exchange,
+                symbol,
+                args.interval,
+                candles,
+                quality,
+                settings,
+            )
         print(f"Stored {count} mocked public candles for {args.exchange} {quote}.")
         print("Research-only data collection completed. No order was placed.")
         return 0
@@ -152,8 +169,35 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
     selected = markets[:max_symbols]
     stored = 0
     for market in selected:
+        if market.status != "TRADING":
+            _assess_and_store_symbol_health(
+                store,
+                args.exchange,
+                market.raw_symbol,
+                args.interval,
+                [],
+                assess_candles([], args.interval),
+                settings,
+                market_status=market.status,
+            )
+            continue
         candles = client.get_candles(market.raw_symbol, args.interval, args.limit)
         stored += store.upsert_candles(candles)
+        quality = assess_candles(
+            candles,
+            args.interval,
+            max_staleness_seconds=settings.max_staleness_seconds,
+        )
+        _assess_and_store_symbol_health(
+            store,
+            args.exchange,
+            market.raw_symbol,
+            args.interval,
+            candles,
+            quality,
+            settings,
+            market_status=market.status,
+        )
     print(
         f"Stored {stored} public candles for {len(selected)} {args.exchange} {quote} symbols. "
         "No private API was used."
@@ -406,23 +450,127 @@ def _score_from_store(
     run_id = str(uuid4())
     benchmark_symbol = f"{quote}-BTC" if exchange == "upbit" else f"BTC{quote}"
     benchmark_candles = store.fetch_candles(exchange, benchmark_symbol, interval, limit=240)
+    benchmark_available = _benchmark_available(
+        benchmark_candles,
+        interval,
+        settings=settings,
+    )
     candidates: list[SignalCandidate] = []
     for symbol in symbols:
         candles = store.fetch_candles(exchange, symbol, interval, limit=240)
-        if len(candles) < 25:
-            continue
         quality = assess_candles(
             candles,
             interval,
             max_staleness_seconds=settings.max_staleness_seconds,
         )
+        health = _assess_and_store_symbol_health(
+            store,
+            exchange,
+            symbol,
+            interval,
+            candles,
+            quality,
+            settings,
+            benchmark_available=benchmark_available,
+        )
+        if len(candles) < 25:
+            continue
         snapshot = build_feature_snapshot(
             candles,
             quality=quality,
             benchmark_candles=benchmark_candles if benchmark_candles else None,
         )
-        candidates.append(engine.score(snapshot, source_run_id=run_id))
+        candidate = engine.score(snapshot, source_run_id=run_id)
+        candidates.append(_candidate_with_symbol_health(candidate, health))
     return rank_candidates(candidates, top=top).candidates
+
+
+def _assess_and_store_symbol_health(
+    store: SQLiteStore,
+    exchange: str,
+    symbol: str,
+    interval: str,
+    candles: list[Candle],
+    quality: DataQualityReport,
+    settings: Settings,
+    *,
+    market_status: str = "TRADING",
+    benchmark_available: bool = True,
+) -> SymbolHealth:
+    health = assess_symbol_health(
+        exchange=exchange,
+        symbol=symbol,
+        interval=interval,
+        candles=candles,
+        quality=quality,
+        market_status=market_status,
+        benchmark_available=benchmark_available,
+        previous=store.get_symbol_health(exchange, symbol, interval),
+        min_history_bars=settings.min_history_bars,
+        quarantine_minutes=settings.symbol_quarantine_minutes,
+    )
+    store.upsert_symbol_health(health)
+    return health
+
+
+def _benchmark_available(
+    benchmark_candles: list[Candle],
+    interval: str,
+    *,
+    settings: Settings,
+) -> bool:
+    if len([candle for candle in benchmark_candles if candle.is_closed]) < settings.min_history_bars:
+        return False
+    quality = assess_candles(
+        benchmark_candles,
+        interval,
+        max_staleness_seconds=settings.max_staleness_seconds,
+    )
+    return quality.status == "pass"
+
+
+def _candidate_with_symbol_health(
+    candidate: SignalCandidate,
+    health: SymbolHealth,
+) -> SignalCandidate:
+    data = candidate.to_dict()
+    risk_flags = _unique_strings(candidate.risk_flags)
+    confidence = candidate.confidence
+    if health.status == "quarantined":
+        risk_flags = _unique_strings([
+            *risk_flags,
+            "symbol_quarantined",
+            _risk_flag_for_quarantine_reason(health.quarantine_reason),
+        ])
+        confidence = "low"
+    if not health.benchmark_available:
+        risk_flags = _unique_strings([*risk_flags, "benchmark_unavailable"])
+        confidence = "low"
+    data.update(
+        {
+            "confidence": confidence,
+            "risk_flags": risk_flags,
+            "symbol_health_status": health.status,
+            "quarantine_reason": health.quarantine_reason,
+            "history_bars_available": health.history_bars_available,
+            "benchmark_available": health.benchmark_available,
+        }
+    )
+    return SignalCandidate(**data)
+
+
+def _risk_flag_for_quarantine_reason(reason: str | None) -> str:
+    if reason is None:
+        return "symbol_quarantined"
+    if reason == "insufficient_history":
+        return "insufficient_history"
+    if reason.startswith("market_status_"):
+        return "inactive_market"
+    return f"quarantine_{reason}"
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(value for value in values if value))
 
 
 def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None:

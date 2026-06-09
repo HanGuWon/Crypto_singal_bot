@@ -103,6 +103,7 @@ Each candidate includes:
 - data timestamp UTC
 - source run id
 - closed-candle and data-quality status
+- symbol health status, quarantine reason, history bars available, and benchmark availability
 
 All human-readable outputs include:
 
@@ -125,6 +126,8 @@ notification rate limits. Rate-limited alerts are recorded with `suppressed_by_r
 Safety-priority alerts such as risk warnings and invalidations use a separate bounded quota so they
 are not blocked by earlier watchlist alerts. Terminal Telegram/Discord authorization or destination
 failures are quarantined in local channel state until configuration is fixed.
+Upside alerts are suppressed for quarantined symbols, stale or incomplete candle data,
+low-liquidity candidates, and candidates missing a usable benchmark.
 
 Telegram placeholders:
 
@@ -162,6 +165,8 @@ development.
 - This is an MVP screener, not a production research platform.
 - Live collection is REST-only; WebSocket support is intentionally absent for now.
 - Backtesting is a leakage-safe smoke engine, not a full portfolio simulator yet.
+- Symbol health quarantine is conservative and local; it is intended to suppress weak research
+  inputs, not to predict asset quality.
 - Notification delivery audit includes a CLI outbox path, but a long-running outbox worker/daemon is
   still a production follow-up.
 - Scoring is interpretable and deterministic but not a profit prediction.

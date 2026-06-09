@@ -17,3 +17,25 @@ def test_stale_or_low_confidence_candidate_is_suppressed() -> None:
 def test_critical_risk_suppresses_upside_alert() -> None:
     candidate = make_candidate(risk_flags=["wide_spread"], confidence="medium")
     assert AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70}) == []
+
+
+def test_quarantined_symbol_suppresses_upside_alert() -> None:
+    candidate = make_candidate(
+        confidence="medium",
+        risk_flags=["symbol_quarantined", "insufficient_history"],
+        symbol_health_status="quarantined",
+        quarantine_reason="insufficient_history",
+        history_bars_available=40,
+    )
+
+    assert AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70}) == []
+
+
+def test_missing_benchmark_suppresses_upside_alert() -> None:
+    candidate = make_candidate(
+        confidence="medium",
+        risk_flags=["benchmark_unavailable"],
+        benchmark_available=False,
+    )
+
+    assert AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70}) == []
