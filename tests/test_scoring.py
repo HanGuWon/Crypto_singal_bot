@@ -28,3 +28,12 @@ def test_scoring_flags_failed_quality_as_low_confidence() -> None:
     candidate = ScoringEngine().score(snapshot)
     assert "stale_data" in candidate.risk_flags
     assert candidate.confidence == "low"
+
+
+def test_scoring_uses_configured_liquidity_threshold() -> None:
+    candles = [c for c in make_mock_candles("binance", "USDT", "5m", limit=100) if c.symbol == "BTCUSDT"]
+    quality = assess_candles(candles, "5m", now=datetime.now(tz=UTC) + timedelta(minutes=1))
+    snapshot = build_feature_snapshot(candles, quality=quality)
+    candidate = ScoringEngine(min_quote_volume=1_000_000_000).score(snapshot)
+    assert "low_liquidity" in candidate.risk_flags
+    assert candidate.confidence == "low"

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from crypto_signal_bot.alerts.dedupe import make_dedupe_key
 from crypto_signal_bot.alerts.schemas import AlertEvent
-from crypto_signal_bot.alerts.state import InMemoryAlertStateStore
+from crypto_signal_bot.alerts.state import AlertState, AlertStateStore, InMemoryAlertStateStore
 from crypto_signal_bot.signals.risk_filters import has_critical_risk
 from crypto_signal_bot.signals.schemas import SignalCandidate
 
@@ -17,13 +17,14 @@ class AlertPolicyConfig:
     exit_threshold: float = 65.0
     score_delta_threshold: float = 15.0
     top_n: int = 10
+    cooldown_minutes: int = 60
 
 
 class AlertPolicy:
     def __init__(
         self,
         config: AlertPolicyConfig | None = None,
-        state_store: InMemoryAlertStateStore | None = None,
+        state_store: AlertStateStore | None = None,
     ) -> None:
         self.config = config or AlertPolicyConfig()
         self.state_store = state_store or InMemoryAlertStateStore()
@@ -69,7 +70,15 @@ class AlertPolicy:
             or candidate.data_quality_status != "pass"
             or "stale_data" in candidate.risk_flags
         ):
-            state.active = False
+            self.state_store.set_active(
+                candidate.exchange,
+                candidate.symbol,
+                candidate.interval,
+                "SCORE_THRESHOLD_CROSSED",
+                active=False,
+                score=candidate.score,
+                alerted_at_utc=now,
+            )
             return [
                 self._event(
                     candidate,
@@ -94,17 +103,18 @@ class AlertPolicy:
         was_below = previous_score is None or previous_score < self.config.score_threshold
         if threshold_crossed and was_below and not state.active:
             event = self._event(candidate, "SCORE_THRESHOLD_CROSSED", "WATCH", previous_score, now)
-            events.append(event)
-            self.state_store.set_active(
-                candidate.exchange,
-                candidate.symbol,
-                candidate.interval,
-                "SCORE_THRESHOLD_CROSSED",
-                active=True,
-                score=candidate.score,
-                rank=candidate.rank,
-                dedupe_key=event.dedupe_key,
-            )
+            if self._state_allows_event(state, event, now):
+                events.append(event)
+                self.state_store.set_active(
+                    candidate.exchange,
+                    candidate.symbol,
+                    candidate.interval,
+                    "SCORE_THRESHOLD_CROSSED",
+                    active=True,
+                    score=candidate.score,
+                    dedupe_key=event.dedupe_key,
+                    alerted_at_utc=now,
+                )
 
         if (
             candidate.rank is not None
@@ -117,17 +127,18 @@ class AlertPolicy:
             )
             if not top_state.active:
                 event = self._event(candidate, "TOP_N_ENTRY", "WATCH", previous_score, now)
-                events.append(event)
-                self.state_store.set_active(
-                    candidate.exchange,
-                    candidate.symbol,
-                    candidate.interval,
-                    "TOP_N_ENTRY",
-                    active=True,
-                    score=candidate.score,
-                    rank=candidate.rank,
-                    dedupe_key=event.dedupe_key,
-                )
+                if self._state_allows_event(top_state, event, now):
+                    events.append(event)
+                    self.state_store.set_active(
+                        candidate.exchange,
+                        candidate.symbol,
+                        candidate.interval,
+                        "TOP_N_ENTRY",
+                        active=True,
+                        score=candidate.score,
+                        dedupe_key=event.dedupe_key,
+                        alerted_at_utc=now,
+                    )
         elif candidate.rank is None or candidate.rank > self.config.top_n:
             self.state_store.set_active(
                 candidate.exchange,
@@ -136,7 +147,6 @@ class AlertPolicy:
                 "TOP_N_ENTRY",
                 active=False,
                 score=candidate.score,
-                rank=candidate.rank,
             )
 
         if (
@@ -145,7 +155,22 @@ class AlertPolicy:
             and candidate.score >= self.config.score_threshold
             and candidate.score - previous_score >= self.config.score_delta_threshold
         ):
-            events.append(self._event(candidate, "SCORE_ACCELERATION", "WATCH", previous_score, now))
+            accel_state = self.state_store.get(
+                candidate.exchange, candidate.symbol, candidate.interval, "SCORE_ACCELERATION"
+            )
+            event = self._event(candidate, "SCORE_ACCELERATION", "WATCH", previous_score, now)
+            if self._state_allows_event(accel_state, event, now):
+                events.append(event)
+                self.state_store.set_active(
+                    candidate.exchange,
+                    candidate.symbol,
+                    candidate.interval,
+                    "SCORE_ACCELERATION",
+                    active=True,
+                    score=candidate.score,
+                    dedupe_key=event.dedupe_key,
+                    alerted_at_utc=now,
+                )
 
         if (
             candidate.component_scores.get("breakout", 0) >= 75
@@ -157,17 +182,18 @@ class AlertPolicy:
             )
             if not breakout_state.active:
                 event = self._event(candidate, "BREAKOUT_WATCH", "WATCH", previous_score, now)
-                events.append(event)
-                self.state_store.set_active(
-                    candidate.exchange,
-                    candidate.symbol,
-                    candidate.interval,
-                    "BREAKOUT_WATCH",
-                    active=True,
-                    score=candidate.score,
-                    rank=candidate.rank,
-                    dedupe_key=event.dedupe_key,
-                )
+                if self._state_allows_event(breakout_state, event, now):
+                    events.append(event)
+                    self.state_store.set_active(
+                        candidate.exchange,
+                        candidate.symbol,
+                        candidate.interval,
+                        "BREAKOUT_WATCH",
+                        active=True,
+                        score=candidate.score,
+                        dedupe_key=event.dedupe_key,
+                        alerted_at_utc=now,
+                    )
         elif candidate.component_scores.get("breakout", 0) < 60:
             self.state_store.set_active(
                 candidate.exchange,
@@ -176,9 +202,15 @@ class AlertPolicy:
                 "BREAKOUT_WATCH",
                 active=False,
                 score=candidate.score,
-                rank=candidate.rank,
             )
         return events
+
+    def _state_allows_event(self, state: AlertState, event: AlertEvent, now: datetime) -> bool:
+        if state.last_dedupe_key == event.dedupe_key:
+            return False
+        if state.last_alerted_at_utc is None:
+            return True
+        return now - state.last_alerted_at_utc >= timedelta(minutes=self.config.cooldown_minutes)
 
     def _event(
         self,

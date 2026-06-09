@@ -5,7 +5,8 @@ from uuid import uuid4
 
 from crypto_signal_bot.features.feature_builder import FeatureSnapshot
 from crypto_signal_bot.features.indicators import clip_score, score_from_centered_value
-from crypto_signal_bot.signals.risk_filters import derive_risk_flags, has_critical_risk
+from crypto_signal_bot.features.normalization import winsorized_component
+from crypto_signal_bot.signals.risk_filters import RiskThresholds, derive_risk_flags, has_critical_risk
 from crypto_signal_bot.signals.schemas import SignalCandidate
 
 
@@ -21,8 +22,18 @@ class ScoringWeights:
 
 
 class ScoringEngine:
-    def __init__(self, weights: ScoringWeights | None = None) -> None:
+    def __init__(
+        self,
+        weights: ScoringWeights | None = None,
+        *,
+        min_quote_volume: float = 1_000.0,
+        max_spread_bps: float = 30.0,
+    ) -> None:
         self.weights = weights or ScoringWeights()
+        self.risk_thresholds = RiskThresholds(
+            min_quote_volume=min_quote_volume,
+            max_spread_bps=max_spread_bps,
+        )
 
     def score(self, snapshot: FeatureSnapshot, *, source_run_id: str | None = None) -> SignalCandidate:
         values = snapshot.values
@@ -52,7 +63,7 @@ class ScoringEngine:
             + relative_strength * self.weights.relative_strength
             + regime * self.weights.regime
         )
-        risk_flags = derive_risk_flags(snapshot)
+        risk_flags = derive_risk_flags(snapshot, self.risk_thresholds)
         penalty = _penalty(values, risk_flags)
         score = clip_score(weighted - penalty)
         confidence = _confidence(component_scores, risk_flags, snapshot.data_quality_status)
@@ -95,7 +106,7 @@ def _momentum_score(values: dict[str, float | None]) -> float:
         score_from_centered_value(values.get("ret_1h") or 0.0, 0.03),
         score_from_centered_value(values.get("ret_4h") or 0.0, 0.06),
     ]
-    return sum(parts) / len(parts)
+    return winsorized_component(parts, low=5.0, high=95.0)
 
 
 def _volume_score(values: dict[str, float | None]) -> float:

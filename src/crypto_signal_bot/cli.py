@@ -9,6 +9,7 @@ from uuid import uuid4
 from crypto_signal_bot.alerts.dispatcher import NotificationDispatcher
 from crypto_signal_bot.alerts.formatter import format_telegram_event
 from crypto_signal_bot.alerts.policy import AlertPolicy, AlertPolicyConfig
+from crypto_signal_bot.alerts.state import SQLiteAlertStateStore
 from crypto_signal_bot.config import ConfigError, Settings, load_settings
 from crypto_signal_bot.data.collector import make_mock_candles
 from crypto_signal_bot.data.quality import assess_candles
@@ -180,7 +181,7 @@ def _alert_test(args: argparse.Namespace, settings: Settings) -> int:
         return 0
     dispatcher = NotificationDispatcher(True, _configured_notifiers(settings, channel=args.channel))
     results = dispatcher.dispatch(events)
-    print(json.dumps([result.__dict__ for result in results], indent=2))
+    print(json.dumps([result.to_safe_dict() for result in results], indent=2))
     return 0
 
 
@@ -196,7 +197,14 @@ def _score_from_store(
     if not symbols:
         print("No stored candles found. Run collect first or use --mock.")
         return []
-    engine = ScoringEngine()
+    engine = ScoringEngine(
+        min_quote_volume=(
+            settings.min_quote_volume_upbit_krw
+            if exchange == "upbit"
+            else settings.min_quote_volume_binance_usdt
+        ),
+        max_spread_bps=settings.max_spread_bps,
+    )
     run_id = str(uuid4())
     benchmark_symbol = f"{quote}-BTC" if exchange == "upbit" else f"BTC{quote}"
     benchmark_candles = store.fetch_candles(exchange, benchmark_symbol, interval, limit=240)
@@ -233,7 +241,10 @@ def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None
             exit_threshold=settings.alert_exit_threshold,
             score_delta_threshold=settings.alert_score_delta_threshold,
             top_n=settings.alert_top_n,
+            cooldown_minutes=settings.alert_cooldown_minutes,
         )
+        ,
+        state_store=SQLiteAlertStateStore(settings.database_path),
     )
     events = policy.evaluate(candidates)
     results = NotificationDispatcher(True, notifiers).dispatch(events)

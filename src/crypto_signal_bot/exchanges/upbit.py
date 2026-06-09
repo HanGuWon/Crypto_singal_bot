@@ -46,6 +46,7 @@ class UpbitPublicClient:
             self.http_client = httpx.Client(timeout=timeout)
         else:
             raise ExchangeClientError("httpx is required for live Upbit requests.")
+        self.cooldown_until_monotonic = 0.0
 
     def get_markets(self, quote: str = "KRW") -> list[MarketSymbol]:
         payload = self._get("/v1/market/all", params={"is_details": "true"}, group="market")
@@ -74,10 +75,15 @@ class UpbitPublicClient:
         url = f"{self.base_url}{path}"
         last_error: Exception | None = None
         for attempt in range(1, self.retry_policy.max_attempts + 1):
+            if time.monotonic() < self.cooldown_until_monotonic:
+                raise ExchangeRateLimitError("Upbit client is cooling down after a rate-limit block.")
             self.limiter.throttle_if_needed(group)
             response = self.http_client.get(url, params=params, headers={"Accept": "application/json"})
             self.limiter.update_from_header(response.headers.get("Remaining-Req"))
             if response.status_code == 418:
+                retry_after = _retry_after_seconds(response)
+                if retry_after is not None:
+                    self.cooldown_until_monotonic = time.monotonic() + retry_after
                 raise ExchangeRateLimitError("Upbit temporary block returned HTTP 418.")
             if response.status_code == 429:
                 sleep = self.retry_policy.sleep_for_attempt(attempt)
@@ -149,3 +155,13 @@ def parse_upbit_orderbook(item: dict[str, Any]) -> OrderBook:
         bids=bids,
         asks=asks,
     )
+
+
+def _retry_after_seconds(response: Any) -> float | None:
+    value = response.headers.get("Retry-After") if hasattr(response, "headers") else None
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None

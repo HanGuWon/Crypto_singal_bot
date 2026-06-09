@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 
 from crypto_signal_bot.alerts.schemas import AlertEvent
+from crypto_signal_bot.logging_config import redact_secrets
 from crypto_signal_bot.notifications.base import NotificationResult, Notifier
 from crypto_signal_bot.notifications.noop import NoopNotifier
 
@@ -29,13 +30,14 @@ class NotificationDispatcher:
                 try:
                     results.append(notifier.send(event))
                 except Exception as exc:  # Notification failures must remain isolated.
-                    LOGGER.warning("Notification adapter failed: %s", exc)
+                    safe_error = redact_secrets(exc)
+                    LOGGER.warning("Notification adapter failed: %s", safe_error)
                     results.append(
                         NotificationResult(
                             getattr(notifier, "channel", "unknown"),
                             "failed",
                             "unknown",
-                            error_message=str(exc),
+                            error_message=safe_error,
                         )
                     )
         return results

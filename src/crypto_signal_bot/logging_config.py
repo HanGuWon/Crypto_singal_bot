@@ -6,7 +6,10 @@ from typing import Any
 
 SECRET_PATTERNS = [
     re.compile(r"(?i)(telegram_bot_token=)[^\s,]+"),
+    re.compile(r"(?i)(TELEGRAM_BOT_TOKEN=)[^\s,]+"),
     re.compile(r"(?i)(bot_token=)[^\s,]+"),
+    re.compile(r"(?i)(api[_-]?key=)[^\s,]+"),
+    re.compile(r"(?i)(authorization:\s*(?:bearer|token)\s+)[^\s,]+"),
     re.compile(r"https://discord(?:app)?\.com/api/webhooks/[^\s]+"),
     re.compile(r"https://api\.telegram\.org/bot[^\s/]+"),
 ]
@@ -22,6 +25,18 @@ def redact_secrets(value: Any) -> str:
         else:
             text = pattern.sub(r"\1[REDACTED]", text)
     return text
+
+
+def redact_data(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): redact_data(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [redact_data(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_data(item) for item in value)
+    if isinstance(value, str):
+        return redact_secrets(value)
+    return value
 
 
 class RedactingFilter(logging.Filter):

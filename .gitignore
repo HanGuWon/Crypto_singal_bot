@@ -4,8 +4,8 @@
 *.db
 *.sqlite
 *.sqlite3
-data/
-logs/
+/data/
+/logs/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

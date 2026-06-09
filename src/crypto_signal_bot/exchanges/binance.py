@@ -42,6 +42,7 @@ class BinancePublicClient:
             self.http_client = httpx.Client(timeout=timeout)
         else:
             raise ExchangeClientError("httpx is required for live Binance requests.")
+        self.cooldown_until_monotonic = 0.0
 
     def get_markets(self, quote: str = "USDT") -> list[MarketSymbol]:
         payload = self._get("/api/v3/exchangeInfo", params={}, weight=20)
@@ -64,7 +65,11 @@ class BinancePublicClient:
         return [parse_binance_ticker(item) for item in payload]
 
     def get_orderbook(self, symbol: str, limit: int = 100) -> OrderBook:
-        payload = self._get("/api/v3/depth", params={"symbol": symbol, "limit": limit}, weight=5)
+        payload = self._get(
+            "/api/v3/depth",
+            params={"symbol": symbol, "limit": limit},
+            weight=binance_depth_request_weight(limit),
+        )
         return parse_binance_orderbook(payload, symbol=symbol)
 
     def _get(self, path: str, *, params: dict[str, Any], weight: int) -> Any:
@@ -72,12 +77,16 @@ class BinancePublicClient:
         url = f"{self.base_url}{path}"
         last_error: Exception | None = None
         for attempt in range(1, self.retry_policy.max_attempts + 1):
+            if time.monotonic() < self.cooldown_until_monotonic:
+                raise ExchangeRateLimitError("Binance client is cooling down after a rate-limit block.")
             if self.limiter.should_backoff(weight):
                 time.sleep(self.retry_policy.sleep_for_attempt(attempt))
             response = self.http_client.get(url, params=params, headers={"Accept": "application/json"})
             self.limiter.update_from_headers(dict(response.headers))
             retry_after = _retry_after_seconds(response)
             if response.status_code == 418:
+                if retry_after is not None:
+                    self.cooldown_until_monotonic = time.monotonic() + retry_after
                 raise ExchangeRateLimitError("Binance temporary block returned HTTP 418.")
             if response.status_code == 429:
                 time.sleep(self.retry_policy.sleep_for_attempt(attempt, retry_after=retry_after))
@@ -147,6 +156,16 @@ def parse_binance_orderbook(item: dict[str, Any], *, symbol: str) -> OrderBook:
     bids = [PriceLevel(float(price), float(quantity)) for price, quantity in item.get("bids", [])]
     asks = [PriceLevel(float(price), float(quantity)) for price, quantity in item.get("asks", [])]
     return OrderBook("binance", symbol, utc_now(), bids=bids, asks=asks)
+
+
+def binance_depth_request_weight(limit: int) -> int:
+    if limit <= 100:
+        return 5
+    if limit <= 500:
+        return 25
+    if limit <= 1000:
+        return 50
+    return 250
 
 
 def _retry_after_seconds(response: Any) -> float | None:
