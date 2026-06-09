@@ -62,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
             return _backtest(args, settings)
         if args.command == "alert-test":
             return _alert_test(args, settings)
+        if args.command == "db":
+            return _db(args, settings)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
@@ -99,6 +101,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     alert_test = sub.add_parser("alert-test", help="Format or send a research alert test.")
     alert_test.add_argument("--channel", choices=["noop", "telegram", "discord"], default="noop")
+
+    db = sub.add_parser("db", help="Inspect or migrate the local research database.")
+    db_sub = db.add_subparsers(dest="db_command", required=True)
+    db_sub.add_parser("migrate", help="Apply versioned SQLite schema migrations.")
+    db_sub.add_parser("doctor", help="Validate required SQLite tables, columns, and indexes.")
     return parser
 
 
@@ -207,6 +214,30 @@ def _alert_test(args: argparse.Namespace, settings: Settings) -> int:
     results = dispatcher.dispatch(events)
     print(json.dumps([result.to_safe_dict() for result in results], indent=2))
     return 0
+
+
+def _db(args: argparse.Namespace, settings: Settings) -> int:
+    store = SQLiteStore(settings.database_path)
+    if args.db_command == "migrate":
+        applied = store.run_migrations()
+        store.validate_schema()
+        print(
+            json.dumps(
+                {
+                    "database_path": str(settings.database_path),
+                    "applied_migrations": applied,
+                    "schema_valid": True,
+                    "research_warning": "Database migration only. No order was placed.",
+                },
+                indent=2,
+            )
+        )
+        return 0
+    if args.db_command == "doctor":
+        status = store.schema_status()
+        print(json.dumps(status, indent=2))
+        return 0 if bool(status["valid"]) else 1
+    raise ConfigError(f"Unknown db command: {args.db_command}")
 
 
 def _score_from_store(

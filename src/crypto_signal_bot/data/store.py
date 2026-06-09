@@ -2,11 +2,24 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable
-from datetime import datetime
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from crypto_signal_bot.data.models import Candle
+
+
+class SchemaValidationError(RuntimeError):
+    """Raised when a local database is missing required schema objects."""
+
+
+@dataclass(frozen=True)
+class Migration:
+    id: int
+    name: str
+    statements: tuple[str, ...]
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS candles (
@@ -124,6 +137,130 @@ CREATE TABLE IF NOT EXISTS alert_state (
 );
 """
 
+INDEX_SCHEMA = """
+CREATE INDEX IF NOT EXISTS idx_notification_deliveries_attempted_status
+ON notification_deliveries(attempted_at_utc, status);
+
+CREATE INDEX IF NOT EXISTS idx_alert_events_lookup
+ON alert_events(id, exchange, symbol, interval, severity, event_type);
+
+CREATE INDEX IF NOT EXISTS idx_notification_outbox_status_created
+ON notification_outbox(status, created_at_utc);
+
+CREATE INDEX IF NOT EXISTS idx_notification_channel_state_channel_hash
+ON notification_channel_state(channel, destination_hash);
+"""
+
+SCHEMA_MIGRATIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  applied_at_utc TEXT NOT NULL
+)
+"""
+
+
+def _split_sql_script(script: str) -> tuple[str, ...]:
+    return tuple(statement.strip() for statement in script.split(";") if statement.strip())
+
+
+MIGRATIONS: tuple[Migration, ...] = (
+    Migration(1, "baseline_schema", _split_sql_script(SCHEMA)),
+    Migration(2, "audit_indexes", _split_sql_script(INDEX_SCHEMA)),
+)
+
+REQUIRED_COLUMNS: dict[str, set[str]] = {
+    "schema_migrations": {"id", "name", "applied_at_utc"},
+    "candles": {
+        "exchange",
+        "symbol",
+        "interval",
+        "open_time_utc",
+        "close_time_utc",
+        "open",
+        "high",
+        "low",
+        "close",
+        "base_volume",
+        "quote_volume",
+        "trade_count",
+        "is_closed",
+    },
+    "alert_events": {
+        "id",
+        "created_at_utc",
+        "exchange",
+        "symbol",
+        "interval",
+        "event_type",
+        "severity",
+        "score",
+        "previous_score",
+        "confidence",
+        "drivers_json",
+        "risk_flags_json",
+        "invalidation",
+        "payload_json",
+        "dedupe_key",
+        "source_run_id",
+    },
+    "notification_deliveries": {
+        "id",
+        "alert_event_id",
+        "channel",
+        "destination",
+        "status",
+        "attempted_at_utc",
+        "delivered_at_utc",
+        "error_code",
+        "error_message",
+        "retry_count",
+        "provider_response_json",
+    },
+    "notification_outbox": {
+        "id",
+        "alert_event_id",
+        "channel",
+        "destination_hash",
+        "status",
+        "created_at_utc",
+        "claimed_at_utc",
+        "completed_at_utc",
+        "retry_count",
+        "last_error_code",
+        "last_error_message",
+        "provider_response_json",
+    },
+    "notification_channel_state": {
+        "channel",
+        "destination_hash",
+        "status",
+        "last_error_code",
+        "last_error_at_utc",
+        "retry_after_until_utc",
+        "manual_reset_required",
+    },
+    "alert_state": {
+        "exchange",
+        "symbol",
+        "interval",
+        "event_type",
+        "active",
+        "entered_at_utc",
+        "exited_at_utc",
+        "last_alerted_at_utc",
+        "last_score",
+        "last_dedupe_key",
+    },
+}
+
+REQUIRED_INDEXES = {
+    "idx_notification_deliveries_attempted_status",
+    "idx_alert_events_lookup",
+    "idx_notification_outbox_status_created",
+    "idx_notification_channel_state_channel_hash",
+}
+
 
 class SQLiteStore:
     def __init__(self, path: str | Path) -> None:
@@ -136,8 +273,86 @@ class SQLiteStore:
         return conn
 
     def init_schema(self) -> None:
+        self.run_migrations()
+        self.validate_schema()
+
+    def run_migrations(self, migrations: Sequence[Migration] | None = None) -> list[int]:
+        selected = tuple(migrations or MIGRATIONS)
+        applied_now: list[int] = []
         with self.connect() as conn:
-            conn.executescript(SCHEMA)
+            conn.execute(SCHEMA_MIGRATIONS_TABLE)
+            conn.commit()
+            applied = {
+                int(row["id"])
+                for row in conn.execute("SELECT id FROM schema_migrations").fetchall()
+            }
+            for migration in selected:
+                if migration.id in applied:
+                    continue
+                try:
+                    conn.execute("BEGIN")
+                    for statement in migration.statements:
+                        conn.execute(statement)
+                    conn.execute(
+                        """
+                        INSERT INTO schema_migrations(id, name, applied_at_utc)
+                        VALUES (?, ?, ?)
+                        """,
+                        (migration.id, migration.name, datetime.now(tz=UTC).isoformat()),
+                    )
+                    conn.execute("COMMIT")
+                    applied_now.append(migration.id)
+                    applied.add(migration.id)
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
+        return applied_now
+
+    def applied_migrations(self) -> list[int]:
+        if not self.path.exists():
+            return []
+        with self.connect() as conn:
+            if "schema_migrations" not in _table_names(conn):
+                return []
+            rows = conn.execute("SELECT id FROM schema_migrations ORDER BY id").fetchall()
+        return [int(row["id"]) for row in rows]
+
+    def validate_schema(self) -> None:
+        if not self.path.exists():
+            raise SchemaValidationError("Database file does not exist.")
+        with self.connect() as conn:
+            tables = _table_names(conn)
+            missing_tables = sorted(set(REQUIRED_COLUMNS) - tables)
+            if missing_tables:
+                raise SchemaValidationError(f"Missing tables: {', '.join(missing_tables)}")
+            missing_columns: list[str] = []
+            for table, required_columns in REQUIRED_COLUMNS.items():
+                columns = _table_columns(conn, table)
+                for column in sorted(required_columns - columns):
+                    missing_columns.append(f"{table}.{column}")
+            if missing_columns:
+                raise SchemaValidationError(f"Missing columns: {', '.join(missing_columns)}")
+            indexes = _index_names(conn)
+            missing_indexes = sorted(REQUIRED_INDEXES - indexes)
+            if missing_indexes:
+                raise SchemaValidationError(f"Missing indexes: {', '.join(missing_indexes)}")
+
+    def schema_status(self) -> dict[str, object]:
+        status: dict[str, object] = {
+            "database_path": str(self.path),
+            "exists": self.path.exists(),
+            "latest_available_migration": max(migration.id for migration in MIGRATIONS),
+            "applied_migrations": self.applied_migrations(),
+            "valid": False,
+            "error": None,
+        }
+        try:
+            self.validate_schema()
+        except SchemaValidationError as exc:
+            status["error"] = str(exc)
+        else:
+            status["valid"] = True
+        return status
 
     def upsert_candles(self, candles: Iterable[Candle]) -> int:
         rows = [candle.to_row() for candle in candles]
@@ -482,6 +697,31 @@ def _priority_sql(priority: str) -> str:
     if priority == "watch":
         return f"NOT {safety_condition}"
     raise ValueError(f"Unknown notification priority: {priority}")
+
+
+def _table_names(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type='table'
+        """
+    ).fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _index_names(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute(
+        """
+        SELECT name FROM sqlite_master
+        WHERE type='index'
+        """
+    ).fetchall()
+    return {str(row["name"]) for row in rows}
 
 
 def _row_to_candle(row: sqlite3.Row) -> Candle:

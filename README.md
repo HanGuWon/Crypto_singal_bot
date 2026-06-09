@@ -64,6 +64,16 @@ Notification formatting test:
 python -m crypto_signal_bot.cli alert-test --channel noop
 ```
 
+Database maintenance:
+
+```bash
+python -m crypto_signal_bot.cli db migrate
+python -m crypto_signal_bot.cli db doctor
+```
+
+The local SQLite schema uses versioned migrations and `db doctor` validates required tables,
+columns, and audit indexes.
+
 ## Output Format
 
 Each candidate includes:
