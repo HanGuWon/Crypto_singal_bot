@@ -77,7 +77,7 @@ class SQLiteNotificationRateLimiter:
         return allowed, suppressed
 
 
-def _priority_sort_key(indexed_event: tuple[int, AlertEvent]) -> tuple[int, int]:
+def _priority_sort_key(indexed_event: tuple[int, AlertEvent]) -> tuple[int, int, int]:
     index, event = indexed_event
     severity_priority = {"CRITICAL": 0, "WARNING": 1, "WATCH": 2, "INFO": 3}
     event_priority = {
