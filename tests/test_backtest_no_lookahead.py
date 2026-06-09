@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import pytest
 
+from crypto_signal_bot.backtest.engine import event_study_next_open
 from crypto_signal_bot.backtest.leakage_checks import assert_next_candle_entry
 from crypto_signal_bot.data.collector import make_mock_candles
 
@@ -16,3 +17,10 @@ def test_entry_must_be_after_signal_close() -> None:
     )
     with pytest.raises(AssertionError):
         assert_next_candle_entry(candles[0], bad_entry)
+
+
+def test_backtest_output_is_marked_diagnostic_only() -> None:
+    candles = [c for c in make_mock_candles("binance", "USDT", "5m", limit=80) if c.symbol == "BTCUSDT"]
+    metrics = event_study_next_open(candles, [50])
+    assert metrics["diagnostic_event_study_only"] is True
+    assert "diagnostic only" in str(metrics["research_warning"])

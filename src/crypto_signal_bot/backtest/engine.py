@@ -24,7 +24,7 @@ def event_study_next_open(
     signal_indices: list[int],
     *,
     assumptions: BacktestAssumptions | None = None,
-) -> dict[str, float]:
+) -> dict[str, float | bool | str]:
     assumptions = assumptions or BacktestAssumptions()
     returns: list[float] = []
     for index in signal_indices:
@@ -38,4 +38,10 @@ def event_study_next_open(
         entry_price = entry.open
         exit_price = candles[exit_index].close
         returns.append(exit_price / entry_price - 1 - assumptions.round_trip_cost)
-    return summarize_returns(returns)
+    metrics: dict[str, float | bool | str] = {}
+    metrics.update(summarize_returns(returns))
+    metrics["diagnostic_event_study_only"] = True
+    metrics["research_warning"] = (
+        "Backtest smoke output is diagnostic only, not a portfolio performance claim."
+    )
+    return metrics

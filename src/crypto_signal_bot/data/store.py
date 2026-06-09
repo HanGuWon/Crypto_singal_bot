@@ -220,6 +220,44 @@ class SQLiteStore:
                 ),
             )
 
+    def count_recent_notification_events(self, since_utc: str) -> int:
+        self.init_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT alert_event_id) AS count
+                FROM notification_deliveries
+                WHERE attempted_at_utc >= ?
+                  AND status != 'suppressed_by_rate_limit'
+                """,
+                (since_utc,),
+            ).fetchone()
+        return int(row["count"])
+
+    def count_recent_symbol_notification_events(
+        self,
+        exchange: str,
+        symbol: str,
+        interval: str,
+        since_utc: str,
+    ) -> int:
+        self.init_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(DISTINCT d.alert_event_id) AS count
+                FROM notification_deliveries d
+                JOIN alert_events e ON e.id = d.alert_event_id
+                WHERE d.attempted_at_utc >= ?
+                  AND d.status != 'suppressed_by_rate_limit'
+                  AND e.exchange = ?
+                  AND e.symbol = ?
+                  AND e.interval = ?
+                """,
+                (since_utc, exchange, symbol, interval),
+            ).fetchone()
+        return int(row["count"])
+
 
 def _quote_like(exchange: str, quote: str) -> str:
     if exchange == "upbit":

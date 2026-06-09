@@ -54,6 +54,10 @@ Backtest smoke check:
 python -m crypto_signal_bot.cli backtest --exchange binance --quote USDT --interval 15m --mock
 ```
 
+Backtest output is marked `diagnostic_event_study_only=true`. The MVP backtest path is a
+leakage-safety smoke check with next-candle entries, not a portfolio simulator or performance
+claim.
+
 Notification formatting test:
 
 ```bash
@@ -93,6 +97,8 @@ DISCORD_WEBHOOK_ENABLED=false
 
 The `--notify` flag does nothing unless global notifications and at least one concrete channel are
 enabled. Alerts are research output only and cannot influence scoring, ranking, or backtesting.
+Before dispatch, alert events are saved locally and filtered by the configured global and per-symbol
+notification rate limits. Rate-limited alerts are recorded with `suppressed_by_rate_limit` status.
 
 Telegram placeholders:
 
@@ -130,5 +136,7 @@ development.
 - This is an MVP screener, not a production research platform.
 - Live collection is REST-only; WebSocket support is intentionally absent for now.
 - Backtesting is a leakage-safe smoke engine, not a full portfolio simulator yet.
+- Notification delivery audit is persistent for the CLI path, but a full durable outbox worker is
+  still a production follow-up.
 - Scoring is interpretable and deterministic but not a profit prediction.
 - Cross-exchange normalization is not implemented.

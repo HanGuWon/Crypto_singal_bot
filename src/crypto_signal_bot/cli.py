@@ -7,10 +7,11 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from crypto_signal_bot.alerts.delivery_log import delivery_record
+from crypto_signal_bot.alerts.delivery_log import delivery_record, suppressed_delivery_record
 from crypto_signal_bot.alerts.dispatcher import NotificationDispatcher
 from crypto_signal_bot.alerts.formatter import format_telegram_event
 from crypto_signal_bot.alerts.policy import AlertPolicy, AlertPolicyConfig
+from crypto_signal_bot.alerts.rate_limit import SQLiteNotificationRateLimiter
 from crypto_signal_bot.alerts.state import SQLiteAlertStateStore
 from crypto_signal_bot.config import ConfigError, Settings, load_settings
 from crypto_signal_bot.data.collector import make_mock_candles
@@ -168,7 +169,10 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
     signal_indices = list(range(50, max(50, len(candles) - 5), 20))
     metrics = event_study_next_open(candles, signal_indices)
     print(json.dumps(metrics, indent=2))
-    print("Backtest smoke run used next-candle entries only. No order was placed.")
+    print(
+        "Backtest diagnostic event-study only; it is not a portfolio performance claim. "
+        "No order was placed."
+    )
     return 0
 
 
@@ -250,20 +254,29 @@ def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None
             score_delta_threshold=settings.alert_score_delta_threshold,
             top_n=settings.alert_top_n,
             cooldown_minutes=settings.alert_cooldown_minutes,
-        )
-        ,
+        ),
         state_store=SQLiteAlertStateStore(settings.database_path),
     )
     events = policy.evaluate(candidates)
-    dispatcher = NotificationDispatcher(True, notifiers)
-    delivery_results = dispatcher.dispatch_with_events(events)
     store = SQLiteStore(settings.database_path)
+    limiter = SQLiteNotificationRateLimiter(
+        store,
+        global_max_per_minute=settings.alert_global_max_per_minute,
+        per_symbol_max_per_hour=settings.alert_per_symbol_max_per_hour,
+    )
+    allowed_events, suppressed_events = limiter.filter_events(events)
     for event in events:
         store.insert_alert_event(event)
+    for decision in suppressed_events:
+        store.insert_notification_delivery(suppressed_delivery_record(decision))
+
+    dispatcher = NotificationDispatcher(True, notifiers)
+    delivery_results = dispatcher.dispatch_with_events(allowed_events)
     for event, result in delivery_results:
         store.insert_notification_delivery(delivery_record(result, event.alert_event_id))
     print(
         f"Ranking completed; {len(events)} alert events evaluated, "
+        f"{len(allowed_events)} allowed, {len(suppressed_events)} rate-limited, "
         f"{len(delivery_results)} delivery attempts recorded."
     )
 

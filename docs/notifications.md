@@ -9,6 +9,7 @@ Flow:
 SignalCandidate
   -> AlertPolicy
   -> AlertEvent
+  -> Notification rate limiter
   -> NotificationDispatcher
   -> NoopNotifier / TelegramNotifier / DiscordWebhookNotifier
 ```
@@ -33,6 +34,9 @@ Dedupe, cooldown, and hysteresis:
 - Dedupe keys include exchange, symbol, interval, event type, score bucket, and driver hash.
 - Cooldown is per exchange/symbol/interval/event type.
 - Hysteresis enters at the alert threshold and exits only below the exit threshold.
+- Global notification limits cap event fan-out per minute.
+- Per-symbol notification limits cap repeated alerts per hour.
+- Rate-limited events are saved with `suppressed_by_rate_limit` delivery status for audit.
 
 Telegram:
 
