@@ -64,7 +64,7 @@ class ScoringEngine:
             + regime * self.weights.regime
         )
         risk_flags = derive_risk_flags(snapshot, self.risk_thresholds)
-        penalty = _penalty(values, risk_flags)
+        penalty = sum(_penalties(values, risk_flags).values())
         score = clip_score(weighted - penalty)
         confidence = _confidence(component_scores, risk_flags, snapshot.data_quality_status)
         return SignalCandidate(
@@ -87,6 +87,42 @@ class ScoringEngine:
             is_closed_candle_signal=snapshot.is_closed_candle_signal,
             data_quality_status=snapshot.data_quality_status,
         )
+
+    def explain(self, snapshot: FeatureSnapshot, candidate: SignalCandidate) -> dict[str, object]:
+        contributions = {
+            "trend": candidate.component_scores["trend"] * self.weights.trend,
+            "momentum": candidate.component_scores["momentum"] * self.weights.momentum,
+            "volume": candidate.component_scores["volume"] * self.weights.volume,
+            "liquidity": candidate.component_scores["liquidity"] * self.weights.liquidity,
+            "breakout": candidate.component_scores["breakout"] * self.weights.breakout,
+            "relative_strength": candidate.component_scores["relative_strength"] * self.weights.relative_strength,
+            "market_regime": candidate.component_scores["market_regime"] * self.weights.regime,
+        }
+        penalties = _penalties(snapshot.values, candidate.risk_flags)
+        weighted_total = sum(contributions.values())
+        penalty_total = sum(penalties.values())
+        reconstructed = clip_score(weighted_total - penalty_total)
+        return {
+            "component_contributions": {key: round(value, 6) for key, value in contributions.items()},
+            "weighted_total": round(weighted_total, 6),
+            "penalties": {key: round(value, 6) for key, value in penalties.items()},
+            "penalty_total": round(penalty_total, 6),
+            "reconstructed_score": round(reconstructed, 6),
+            "final_score": candidate.score,
+            "confidence": candidate.confidence,
+            "confidence_reason": _confidence_reason(
+                candidate.component_scores,
+                candidate.risk_flags,
+                snapshot.data_quality_status,
+            ),
+            "risk_flags": candidate.risk_flags,
+            "data_quality_status": snapshot.data_quality_status,
+            "data_quality_warnings": snapshot.data_quality_warnings,
+            "symbol_health_status": candidate.symbol_health_status,
+            "quarantine_reason": candidate.quarantine_reason,
+            "history_bars_available": candidate.history_bars_available,
+            "benchmark_available": candidate.benchmark_available,
+        }
 
 
 def _trend_score(values: dict[str, float | None]) -> float:
@@ -137,19 +173,23 @@ def _relative_strength_score(values: dict[str, float | None]) -> float:
 
 
 def _penalty(values: dict[str, float | None], risk_flags: list[str]) -> float:
-    penalty = 0.0
+    return sum(_penalties(values, risk_flags).values())
+
+
+def _penalties(values: dict[str, float | None], risk_flags: list[str]) -> dict[str, float]:
+    penalties: dict[str, float] = {}
     rv = values.get("realized_volatility_20")
     if rv is not None and rv > 0.05:
-        penalty += min((rv - 0.05) * 300, 15)
+        penalties["excessive_volatility"] = min((rv - 0.05) * 300, 15)
     if "wide_spread" in risk_flags:
-        penalty += 20
+        penalties["wide_spread"] = 20
     if "low_liquidity" in risk_flags:
-        penalty += 25
+        penalties["low_liquidity"] = 25
     if "upper_wick_reversal_risk" in risk_flags:
-        penalty += 10
+        penalties["upper_wick_reversal_risk"] = 10
     if has_critical_risk(risk_flags):
-        penalty += 15
-    return penalty
+        penalties["critical_risk"] = 15
+    return penalties
 
 
 def _confidence(
@@ -165,6 +205,23 @@ def _confidence(
     if constructive >= 3:
         return "medium"
     return "low"
+
+
+def _confidence_reason(
+    component_scores: dict[str, float],
+    risk_flags: list[str],
+    data_quality_status: str,
+) -> str:
+    if data_quality_status == "fail":
+        return "failed_data_quality"
+    if has_critical_risk(risk_flags):
+        return "critical_risk_flag"
+    constructive = sum(1 for value in component_scores.values() if value >= 60)
+    if constructive >= 5 and not risk_flags:
+        return "broad_constructive_evidence"
+    if constructive >= 3:
+        return "mixed_constructive_evidence"
+    return "limited_constructive_evidence"
 
 
 def _drivers(component_scores: dict[str, float], values: dict[str, float | None]) -> list[str]:

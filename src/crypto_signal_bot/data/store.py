@@ -174,6 +174,43 @@ CREATE INDEX IF NOT EXISTS idx_symbol_health_status
 ON symbol_health(exchange, interval, status, quarantine_until_utc);
 """
 
+RESEARCH_RUN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS research_runs (
+  run_id TEXT PRIMARY KEY,
+  created_at_utc TEXT NOT NULL,
+  commit_sha TEXT NOT NULL,
+  config_hash TEXT NOT NULL,
+  exchange TEXT NOT NULL,
+  quote TEXT NOT NULL,
+  interval TEXT NOT NULL,
+  data_window_start_utc TEXT,
+  data_window_end_utc TEXT,
+  mock_mode INTEGER NOT NULL,
+  candidate_count INTEGER NOT NULL,
+  research_warning TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS feature_snapshots (
+  run_id TEXT NOT NULL,
+  exchange TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  interval TEXT NOT NULL,
+  data_timestamp_utc TEXT NOT NULL,
+  feature_json TEXT NOT NULL,
+  component_scores_json TEXT NOT NULL,
+  penalties_json TEXT NOT NULL,
+  risk_flags_json TEXT NOT NULL,
+  score_explanation_json TEXT NOT NULL,
+  PRIMARY KEY(run_id, exchange, symbol, interval)
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_runs_created
+ON research_runs(created_at_utc);
+
+CREATE INDEX IF NOT EXISTS idx_feature_snapshots_run
+ON feature_snapshots(run_id, exchange, symbol);
+"""
+
 SCHEMA_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
   id INTEGER PRIMARY KEY,
@@ -191,6 +228,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "baseline_schema", _split_sql_script(SCHEMA)),
     Migration(2, "audit_indexes", _split_sql_script(INDEX_SCHEMA)),
     Migration(3, "symbol_health", _split_sql_script(SYMBOL_HEALTH_SCHEMA)),
+    Migration(4, "research_runs", _split_sql_script(RESEARCH_RUN_SCHEMA)),
 )
 
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -290,6 +328,32 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "benchmark_available",
         "updated_at_utc",
     },
+    "research_runs": {
+        "run_id",
+        "created_at_utc",
+        "commit_sha",
+        "config_hash",
+        "exchange",
+        "quote",
+        "interval",
+        "data_window_start_utc",
+        "data_window_end_utc",
+        "mock_mode",
+        "candidate_count",
+        "research_warning",
+    },
+    "feature_snapshots": {
+        "run_id",
+        "exchange",
+        "symbol",
+        "interval",
+        "data_timestamp_utc",
+        "feature_json",
+        "component_scores_json",
+        "penalties_json",
+        "risk_flags_json",
+        "score_explanation_json",
+    },
 }
 
 REQUIRED_INDEXES = {
@@ -298,6 +362,8 @@ REQUIRED_INDEXES = {
     "idx_notification_outbox_status_created",
     "idx_notification_channel_state_channel_hash",
     "idx_symbol_health_status",
+    "idx_research_runs_created",
+    "idx_feature_snapshots_run",
 }
 
 
@@ -507,6 +573,88 @@ class SQLiteStore:
         with self.connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [_row_to_symbol_health(row) for row in rows]
+
+    def insert_research_run(self, record: dict[str, object]) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO research_runs VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["run_id"],
+                    record["created_at_utc"],
+                    record["commit_sha"],
+                    record["config_hash"],
+                    record["exchange"],
+                    record["quote"],
+                    record["interval"],
+                    record["data_window_start_utc"],
+                    record["data_window_end_utc"],
+                    int(bool(record["mock_mode"])),
+                    record["candidate_count"],
+                    record["research_warning"],
+                ),
+            )
+
+    def insert_feature_snapshot(self, record: dict[str, object]) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO feature_snapshots VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["run_id"],
+                    record["exchange"],
+                    record["symbol"],
+                    record["interval"],
+                    record["data_timestamp_utc"],
+                    json.dumps(record["feature"]),
+                    json.dumps(record["component_scores"]),
+                    json.dumps(record["penalties"]),
+                    json.dumps(record["risk_flags"]),
+                    json.dumps(record["score_explanation"]),
+                ),
+            )
+
+    def list_research_runs(self, limit: int = 20) -> list[sqlite3.Row]:
+        self.init_schema()
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT * FROM research_runs
+                    ORDER BY created_at_utc DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+            )
+
+    def get_research_run(self, run_id: str) -> sqlite3.Row | None:
+        self.init_schema()
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM research_runs WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+
+    def get_feature_snapshots(self, run_id: str) -> list[sqlite3.Row]:
+        self.init_schema()
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT * FROM feature_snapshots
+                    WHERE run_id=?
+                    ORDER BY symbol
+                    """,
+                    (run_id,),
+                )
+            )
 
     def insert_alert_event(self, event: object) -> None:
         self.init_schema()

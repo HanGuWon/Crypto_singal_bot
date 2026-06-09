@@ -39,6 +39,7 @@ Use mocked fixture data without live internet:
 python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interval 5m --limit 120 --mock
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format table
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json
+python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --save-run
 ```
 
 Use public live collection with conservative caps:
@@ -86,6 +87,19 @@ python -m crypto_signal_bot.cli notifications outbox drain --dry-run
 
 Notification operations display destination hashes only. They do not print Telegram tokens or
 Discord webhook URLs.
+
+Research run reproducibility:
+
+```bash
+python -m crypto_signal_bot.cli runs list
+python -m crypto_signal_bot.cli runs show RUN_ID
+python -m crypto_signal_bot.cli runs export RUN_ID --format json
+```
+
+Saved runs include a commit SHA, safe config hash, data window, candidate count, feature snapshots,
+component contributions, penalties, risk flags, data-quality notes, symbol-health notes, and the
+research-only warning. Exports are research artifacts only, not financial advice or performance
+claims, and they do not include Telegram tokens, Discord webhook URLs, or exchange secrets.
 
 ## Output Format
 

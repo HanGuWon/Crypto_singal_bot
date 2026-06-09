@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -23,13 +25,14 @@ from crypto_signal_bot.data.symbol_health import assess_symbol_health
 from crypto_signal_bot.exchanges.base import PublicMarketDataClient
 from crypto_signal_bot.exchanges.binance import BinancePublicClient
 from crypto_signal_bot.exchanges.upbit import UpbitPublicClient
-from crypto_signal_bot.features.feature_builder import build_feature_snapshot
+from crypto_signal_bot.features.feature_builder import FeatureSnapshot, build_feature_snapshot
 from crypto_signal_bot.logging_config import configure_logging
 from crypto_signal_bot.notifications.base import Notifier
 from crypto_signal_bot.notifications.destinations import destination_hash, notifier_destination
 from crypto_signal_bot.notifications.discord_webhook import DiscordWebhookNotifier
 from crypto_signal_bot.notifications.noop import NoopNotifier
 from crypto_signal_bot.notifications.telegram import TelegramNotifier
+from crypto_signal_bot.research import config_hash
 from crypto_signal_bot.signals.ranking import rank_candidates
 from crypto_signal_bot.signals.schemas import SignalCandidate
 from crypto_signal_bot.signals.scoring import ScoringEngine
@@ -44,6 +47,15 @@ try:  # pragma: no cover - rich availability depends on environment
     Table = RichTable
 except ImportError:  # pragma: no cover
     pass
+
+
+@dataclass(frozen=True)
+class ScoredResearchCandidate:
+    candidate: SignalCandidate
+    snapshot: FeatureSnapshot
+    score_explanation: dict[str, object]
+    data_window_start_utc: str
+    data_window_end_utc: str
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
             return _db(args, settings)
         if args.command == "notifications":
             return _notifications(args, settings)
+        if args.command == "runs":
+            return _runs(args, settings)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
@@ -94,6 +108,7 @@ def _build_parser() -> argparse.ArgumentParser:
     rank.add_argument("--format", choices=["table", "json"], default="table")
     rank.add_argument("--notify", action="store_true")
     rank.add_argument("--mock", action="store_true", help="Seed deterministic fixture data before ranking.")
+    rank.add_argument("--save-run", action="store_true", help="Persist reproducible research-run artifacts.")
 
     backtest = sub.add_parser("backtest", help="Run a minimal leakage-safe event-study smoke test.")
     backtest.add_argument("--exchange", choices=["upbit", "binance"], required=True)
@@ -134,6 +149,16 @@ def _build_parser() -> argparse.ArgumentParser:
     outbox_drain = outbox_sub.add_parser("drain", help="Drain pending/retryable outbox rows.")
     outbox_drain.add_argument("--max", dest="max_rows", type=int, default=10)
     outbox_drain.add_argument("--dry-run", action="store_true")
+
+    runs = sub.add_parser("runs", help="Inspect saved research runs.")
+    runs_sub = runs.add_subparsers(dest="runs_command", required=True)
+    runs_list = runs_sub.add_parser("list", help="List saved research runs.")
+    runs_list.add_argument("--limit", type=int, default=20)
+    runs_show = runs_sub.add_parser("show", help="Show one saved research run.")
+    runs_show.add_argument("run_id")
+    runs_export = runs_sub.add_parser("export", help="Export one saved research run.")
+    runs_export.add_argument("run_id")
+    runs_export.add_argument("--format", choices=["json"], default="json")
     return parser
 
 
@@ -210,23 +235,36 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
     store = SQLiteStore(settings.database_path)
     if args.mock:
         store.upsert_candles(make_mock_candles(args.exchange, quote, args.interval, limit=160))
-    candidates = _score_from_store(store, args.exchange, quote, args.interval, args.top, settings)
-    result = rank_candidates(candidates, top=args.top)
-    if args.format == "json":
-        print(
-            json.dumps(
-                {
-                    "source_run_id": result.source_run_id,
-                    "generated_at_utc": result.generated_at_utc,
-                    "research_warning": result.research_warning,
-                    "candidates": [candidate.to_dict() for candidate in result.candidates],
-                },
-                indent=2,
-                ensure_ascii=False,
-            )
+    scored = _score_research_from_store(store, args.exchange, quote, args.interval, args.top, settings)
+    result = rank_candidates([item.candidate for item in scored], top=args.top)
+    if args.save_run:
+        _save_research_run(
+            store,
+            result_candidates=result.candidates,
+            scored_candidates=scored,
+            settings=settings,
+            exchange=args.exchange,
+            quote=quote,
+            interval=args.interval,
+            mock_mode=bool(args.mock),
+            generated_at_utc=result.generated_at_utc,
+            research_warning=result.research_warning,
+            run_id=result.source_run_id,
         )
+    if args.format == "json":
+        payload: dict[str, object] = {
+            "source_run_id": result.source_run_id,
+            "generated_at_utc": result.generated_at_utc,
+            "research_warning": result.research_warning,
+            "candidates": [candidate.to_dict() for candidate in result.candidates],
+        }
+        if args.save_run:
+            payload["saved_run_id"] = result.source_run_id
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         _print_table(result.candidates)
+        if args.save_run:
+            print(f"Saved research run {result.source_run_id}.")
 
     if args.notify:
         _maybe_notify(result.candidates, settings)
@@ -435,6 +473,18 @@ def _score_from_store(
     top: int,
     settings: Settings,
 ) -> list[SignalCandidate]:
+    scored = _score_research_from_store(store, exchange, quote, interval, top, settings)
+    return rank_candidates([item.candidate for item in scored], top=top).candidates
+
+
+def _score_research_from_store(
+    store: SQLiteStore,
+    exchange: str,
+    quote: str,
+    interval: str,
+    top: int,
+    settings: Settings,
+) -> list[ScoredResearchCandidate]:
     symbols = store.list_symbols(exchange, quote, interval)
     if not symbols:
         print("No stored candles found. Run collect first or use --mock.")
@@ -455,7 +505,7 @@ def _score_from_store(
         interval,
         settings=settings,
     )
-    candidates: list[SignalCandidate] = []
+    scored_candidates: list[ScoredResearchCandidate] = []
     for symbol in symbols:
         candles = store.fetch_candles(exchange, symbol, interval, limit=240)
         quality = assess_candles(
@@ -481,8 +531,17 @@ def _score_from_store(
             benchmark_candles=benchmark_candles if benchmark_candles else None,
         )
         candidate = engine.score(snapshot, source_run_id=run_id)
-        candidates.append(_candidate_with_symbol_health(candidate, health))
-    return rank_candidates(candidates, top=top).candidates
+        candidate = _candidate_with_symbol_health(candidate, health)
+        scored_candidates.append(
+            ScoredResearchCandidate(
+                candidate=candidate,
+                snapshot=snapshot,
+                score_explanation=engine.explain(snapshot, candidate),
+                data_window_start_utc=candles[0].open_time_utc.isoformat(),
+                data_window_end_utc=candles[-1].close_time_utc.isoformat(),
+            )
+        )
+    return scored_candidates
 
 
 def _assess_and_store_symbol_health(
@@ -573,6 +632,124 @@ def _unique_strings(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
 
 
+def _save_research_run(
+    store: SQLiteStore,
+    *,
+    result_candidates: list[SignalCandidate],
+    scored_candidates: list[ScoredResearchCandidate],
+    settings: Settings,
+    exchange: str,
+    quote: str,
+    interval: str,
+    mock_mode: bool,
+    generated_at_utc: str,
+    research_warning: str,
+    run_id: str,
+) -> None:
+    by_key = {
+        (item.candidate.exchange, item.candidate.symbol, item.candidate.interval): item
+        for item in scored_candidates
+    }
+    selected = [
+        by_key[(candidate.exchange, candidate.symbol, candidate.interval)]
+        for candidate in result_candidates
+        if (candidate.exchange, candidate.symbol, candidate.interval) in by_key
+    ]
+    store.insert_research_run(
+        {
+            "run_id": run_id,
+            "created_at_utc": generated_at_utc,
+            "commit_sha": _current_commit_sha(),
+            "config_hash": config_hash(settings),
+            "exchange": exchange,
+            "quote": quote,
+            "interval": interval,
+            "data_window_start_utc": (
+                min(item.data_window_start_utc for item in selected) if selected else None
+            ),
+            "data_window_end_utc": (
+                max(item.data_window_end_utc for item in selected) if selected else None
+            ),
+            "mock_mode": mock_mode,
+            "candidate_count": len(result_candidates),
+            "research_warning": research_warning,
+        }
+    )
+    for candidate in result_candidates:
+        item = by_key.get((candidate.exchange, candidate.symbol, candidate.interval))
+        if item is None:
+            continue
+        explanation = {
+            **item.score_explanation,
+            "rank": candidate.rank,
+            "score": candidate.score,
+            "research_warning": research_warning,
+        }
+        store.insert_feature_snapshot(
+            {
+                "run_id": run_id,
+                "exchange": candidate.exchange,
+                "symbol": candidate.symbol,
+                "interval": candidate.interval,
+                "data_timestamp_utc": candidate.data_timestamp_utc,
+                "feature": item.snapshot.values,
+                "component_scores": candidate.component_scores,
+                "penalties": explanation["penalties"],
+                "risk_flags": candidate.risk_flags,
+                "score_explanation": explanation,
+            }
+        )
+
+
+def _runs(args: argparse.Namespace, settings: Settings) -> int:
+    store = SQLiteStore(settings.database_path)
+    if args.runs_command == "list":
+        _print_json({"runs": [_research_run_row_to_dict(row) for row in store.list_research_runs(args.limit)]})
+        return 0
+    if args.runs_command == "show":
+        run = store.get_research_run(args.run_id)
+        if run is None:
+            print(f"Research run not found: {args.run_id}", file=sys.stderr)
+            return 1
+        _print_json(
+            {
+                "run": _research_run_row_to_dict(run),
+                "snapshot_count": len(store.get_feature_snapshots(args.run_id)),
+            }
+        )
+        return 0
+    if args.runs_command == "export":
+        run = store.get_research_run(args.run_id)
+        if run is None:
+            print(f"Research run not found: {args.run_id}", file=sys.stderr)
+            return 1
+        _print_json(
+            {
+                "research_warning": run["research_warning"],
+                "run": _research_run_row_to_dict(run),
+                "feature_snapshots": [
+                    _feature_snapshot_row_to_dict(row)
+                    for row in store.get_feature_snapshots(args.run_id)
+                ],
+            }
+        )
+        return 0
+    raise ConfigError(f"Unknown runs command: {args.runs_command}")
+
+
+def _current_commit_sha() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return result.stdout.strip() or "unknown"
+
+
 def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None:
     if not settings.notifications_enabled:
         print("Ranking completed; notifications skipped because they are disabled.")
@@ -661,6 +838,38 @@ def _configured_notifiers(settings: Settings, channel: str | None = None) -> lis
 
 def _print_json(payload: dict[str, object]) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _research_run_row_to_dict(row: Any) -> dict[str, object]:
+    return {
+        "run_id": row["run_id"],
+        "created_at_utc": row["created_at_utc"],
+        "commit_sha": row["commit_sha"],
+        "config_hash": row["config_hash"],
+        "exchange": row["exchange"],
+        "quote": row["quote"],
+        "interval": row["interval"],
+        "data_window_start_utc": row["data_window_start_utc"],
+        "data_window_end_utc": row["data_window_end_utc"],
+        "mock_mode": bool(row["mock_mode"]),
+        "candidate_count": row["candidate_count"],
+        "research_warning": row["research_warning"],
+    }
+
+
+def _feature_snapshot_row_to_dict(row: Any) -> dict[str, object]:
+    return {
+        "run_id": row["run_id"],
+        "exchange": row["exchange"],
+        "symbol": row["symbol"],
+        "interval": row["interval"],
+        "data_timestamp_utc": row["data_timestamp_utc"],
+        "feature": json.loads(str(row["feature_json"])),
+        "component_scores": json.loads(str(row["component_scores_json"])),
+        "penalties": json.loads(str(row["penalties_json"])),
+        "risk_flags": json.loads(str(row["risk_flags_json"])),
+        "score_explanation": json.loads(str(row["score_explanation_json"])),
+    }
 
 
 def _channel_state_row_to_dict(row: Any) -> dict[str, object]:

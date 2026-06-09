@@ -29,6 +29,12 @@ Data-quality quarantine:
 - Missing benchmarks lower alert eligibility; this is a research-data-quality guard, not a market
   prediction.
 
+Research run exports:
+
+- Saved runs are reproducibility artifacts for research review.
+- Exports include safe config hashes and score explanations, not raw secrets.
+- Exports are not financial advice, not trade instructions, and not performance claims.
+
 Secrets:
 
 - No private exchange keys are needed.
