@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from datetime import UTC, datetime
+from typing import Any
 from uuid import uuid4
 
 from crypto_signal_bot.alerts.delivery_log import delivery_record
@@ -15,10 +16,12 @@ from crypto_signal_bot.config import ConfigError, Settings, load_settings
 from crypto_signal_bot.data.collector import make_mock_candles
 from crypto_signal_bot.data.quality import assess_candles
 from crypto_signal_bot.data.store import SQLiteStore
+from crypto_signal_bot.exchanges.base import PublicMarketDataClient
 from crypto_signal_bot.exchanges.binance import BinancePublicClient
 from crypto_signal_bot.exchanges.upbit import UpbitPublicClient
 from crypto_signal_bot.features.feature_builder import build_feature_snapshot
 from crypto_signal_bot.logging_config import configure_logging
+from crypto_signal_bot.notifications.base import Notifier
 from crypto_signal_bot.notifications.discord_webhook import DiscordWebhookNotifier
 from crypto_signal_bot.notifications.noop import NoopNotifier
 from crypto_signal_bot.notifications.telegram import TelegramNotifier
@@ -26,12 +29,16 @@ from crypto_signal_bot.signals.ranking import rank_candidates
 from crypto_signal_bot.signals.schemas import SignalCandidate
 from crypto_signal_bot.signals.scoring import ScoringEngine
 
+Console: Any = None
+Table: Any = None
 try:  # pragma: no cover - rich availability depends on environment
-    from rich.console import Console
-    from rich.table import Table
+    from rich.console import Console as RichConsole
+    from rich.table import Table as RichTable
+
+    Console = RichConsole
+    Table = RichTable
 except ImportError:  # pragma: no cover
-    Console = None  # type: ignore[assignment]
-    Table = None  # type: ignore[assignment]
+    pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -261,8 +268,8 @@ def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None
     )
 
 
-def _configured_notifiers(settings: Settings, channel: str | None = None) -> list[object]:
-    notifiers: list[object] = []
+def _configured_notifiers(settings: Settings, channel: str | None = None) -> list[Notifier]:
+    notifiers: list[Notifier] = []
     if (channel in {None, "telegram"}) and settings.telegram_enabled:
         settings.validate_notification_channel("telegram")
         notifiers.append(
@@ -288,7 +295,7 @@ def _configured_notifiers(settings: Settings, channel: str | None = None) -> lis
     return notifiers
 
 
-def _exchange_client(exchange: str, settings: Settings) -> object:
+def _exchange_client(exchange: str, settings: Settings) -> PublicMarketDataClient:
     if exchange == "upbit":
         return UpbitPublicClient(settings.upbit_base_url, timeout=settings.default_request_timeout_seconds)
     return BinancePublicClient(settings.binance_base_url, timeout=settings.default_request_timeout_seconds)

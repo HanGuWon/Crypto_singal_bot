@@ -55,7 +55,7 @@ def format_discord_payload(
     username: str = "Crypto Signal Research Bot",
     allow_mentions: bool = False,
 ) -> dict[str, Any]:
-    fields = [
+    fields: list[dict[str, object]] = [
         {"name": "Score", "value": f"{event.score:.1f} ({event.confidence})", "inline": True},
         {"name": "Rank", "value": f"#{event.rank}" if event.rank is not None else "n/a", "inline": True},
         {
@@ -69,7 +69,7 @@ def format_discord_payload(
         {"name": "Data timestamp UTC", "value": event.data_timestamp_utc},
     ]
     description = RESEARCH_WARNING
-    validate_safe_message(description + " " + " ".join(field["value"] for field in fields))
+    validate_safe_message(description + " " + " ".join(str(field["value"]) for field in fields))
     payload: dict[str, Any] = {
         "username": username,
         "content": RESEARCH_WARNING,
