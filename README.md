@@ -55,9 +55,11 @@ Backtest smoke check:
 python -m crypto_signal_bot.cli backtest --exchange binance --quote USDT --interval 15m --mock
 ```
 
-Backtest output is marked `diagnostic_event_study_only=true`. The MVP backtest path is a
-leakage-safety smoke check with next-candle entries, not a portfolio simulator or performance
-claim.
+Backtest output is marked with `diagnostic_event_study_only=true`,
+`not_portfolio_simulator=true`, `no_execution_model=true`, and `hypothetical_diagnostic_only=true`.
+The MVP backtest path is a leakage-safety diagnostic with next-candle entries, benchmark/universe
+context, cost sensitivity, and data-quality-conditioned summaries. It is not a trading
+recommendation, not financial advice, and no order is placed.
 
 Notification formatting test:
 

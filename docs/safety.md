@@ -35,6 +35,14 @@ Research run exports:
 - Exports include safe config hashes and score explanations, not raw secrets.
 - Exports are not financial advice, not trade instructions, and not performance claims.
 
+Backtest diagnostics:
+
+- Backtest output is a hypothetical diagnostic event study.
+- It uses next-candle entries for leakage checks but does not model execution or portfolio
+  management.
+- Output flags explicitly mark that it is not a portfolio simulator, not financial advice, and no
+  order was placed.
+
 Secrets:
 
 - No private exchange keys are needed.

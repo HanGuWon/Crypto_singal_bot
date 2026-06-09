@@ -272,7 +272,7 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _backtest(args: argparse.Namespace, settings: Settings) -> int:
-    from crypto_signal_bot.backtest.engine import event_study_next_open
+    from crypto_signal_bot.backtest.engine import diagnostic_event_study
 
     quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
     store = SQLiteStore(settings.database_path)
@@ -288,16 +288,38 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
     if not symbols:
         print("No stored candles found. Run collect first or use --mock.")
         return 1
-    candles = (
-        [candle for candle in mocked_candles if candle.symbol == symbols[0]]
-        if mocked_candles is not None
-        else store.fetch_candles(args.exchange, symbols[0], args.interval)
+    candles_by_symbol = {
+        symbol: (
+            [candle for candle in mocked_candles if candle.symbol == symbol]
+            if mocked_candles is not None
+            else store.fetch_candles(args.exchange, symbol, args.interval)
+        )
+        for symbol in symbols
+    }
+    signal_indices_by_symbol = {
+        symbol: list(range(50, max(50, len(candles) - 5), 20))
+        for symbol, candles in candles_by_symbol.items()
+    }
+    benchmark_symbol = f"{quote}-BTC" if args.exchange == "upbit" else f"BTC{quote}"
+    metrics = diagnostic_event_study(
+        candles_by_symbol,
+        signal_indices_by_symbol,
+        benchmark_symbol=benchmark_symbol,
+        symbol_conditions={
+            symbol: _backtest_symbol_condition(
+                store,
+                args.exchange,
+                symbol,
+                args.interval,
+                candles,
+                settings,
+            )
+            for symbol, candles in candles_by_symbol.items()
+        },
     )
-    signal_indices = list(range(50, max(50, len(candles) - 5), 20))
-    metrics = event_study_next_open(candles, signal_indices)
     print(json.dumps(metrics, indent=2))
     print(
-        "Backtest diagnostic event-study only; it is not a portfolio performance claim. "
+        "Backtest diagnostic event-study only; it is not a portfolio simulator or financial advice. "
         "No order was placed."
     )
     return 0
@@ -322,6 +344,50 @@ def _alert_test(args: argparse.Namespace, settings: Settings) -> int:
     results = dispatcher.dispatch(events)
     print(json.dumps([result.to_safe_dict() for result in results], indent=2))
     return 0
+
+
+def _backtest_symbol_condition(
+    store: SQLiteStore,
+    exchange: str,
+    symbol: str,
+    interval: str,
+    candles: list[Candle],
+    settings: Settings,
+) -> dict[str, object]:
+    quality = assess_candles(
+        candles,
+        interval,
+        max_staleness_seconds=settings.max_staleness_seconds,
+    )
+    health = assess_symbol_health(
+        exchange=exchange,
+        symbol=symbol,
+        interval=interval,
+        candles=candles,
+        quality=quality,
+        previous=store.get_symbol_health(exchange, symbol, interval),
+        min_history_bars=settings.min_history_bars,
+        quarantine_minutes=settings.symbol_quarantine_minutes,
+    )
+    risk_flags: list[str] = []
+    if quality.status == "fail":
+        risk_flags.append("failed_data_quality")
+    risk_flags.extend(warning for warning in quality.warnings if warning in {"stale_data", "incomplete_current_candle"})
+    latest_quote_volume = candles[-1].quote_volume if candles else None
+    min_quote_volume = (
+        settings.min_quote_volume_upbit_krw
+        if exchange == "upbit"
+        else settings.min_quote_volume_binance_usdt
+    )
+    if latest_quote_volume is not None and latest_quote_volume < min_quote_volume:
+        risk_flags.append("low_liquidity")
+    return {
+        "data_quality_status": quality.status,
+        "risk_flags": _unique_strings(risk_flags),
+        "symbol_health_status": health.status,
+        "quarantine_reason": health.quarantine_reason,
+        "confidence": "low" if health.status == "quarantined" or risk_flags else "medium",
+    }
 
 
 def _db(args: argparse.Namespace, settings: Settings) -> int:

@@ -9,7 +9,7 @@ def summarize_returns(returns: list[float]) -> dict[str, float]:
             "trades": 0,
             "hit_rate": 0.0,
             "average_return": 0.0,
-            "profit_factor": 0.0,
+            "gain_loss_factor": 0.0,
             "max_drawdown": 0.0,
             "sharpe": 0.0,
         }
@@ -31,7 +31,7 @@ def summarize_returns(returns: list[float]) -> dict[str, float]:
         "trades": float(len(returns)),
         "hit_rate": len(wins) / len(returns),
         "average_return": mean,
-        "profit_factor": gross_win / gross_loss if gross_loss else float("inf"),
+        "gain_loss_factor": gross_win / gross_loss if gross_loss else 0.0,
         "max_drawdown": max_drawdown,
         "sharpe": sharpe,
     }
