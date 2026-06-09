@@ -74,6 +74,19 @@ python -m crypto_signal_bot.cli db doctor
 The local SQLite schema uses versioned migrations and `db doctor` validates required tables,
 columns, and audit indexes.
 
+Notification operations:
+
+```bash
+python -m crypto_signal_bot.cli notifications status
+python -m crypto_signal_bot.cli notifications channel-state list
+python -m crypto_signal_bot.cli notifications channel-state reset --channel discord --destination-hash HASH --confirm
+python -m crypto_signal_bot.cli notifications outbox list --status failed_retryable
+python -m crypto_signal_bot.cli notifications outbox drain --dry-run
+```
+
+Notification operations display destination hashes only. They do not print Telegram tokens or
+Discord webhook URLs.
+
 ## Output Format
 
 Each candidate includes:

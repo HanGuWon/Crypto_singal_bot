@@ -64,6 +64,8 @@ def main(argv: list[str] | None = None) -> int:
             return _alert_test(args, settings)
         if args.command == "db":
             return _db(args, settings)
+        if args.command == "notifications":
+            return _notifications(args, settings)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
@@ -106,6 +108,30 @@ def _build_parser() -> argparse.ArgumentParser:
     db_sub = db.add_subparsers(dest="db_command", required=True)
     db_sub.add_parser("migrate", help="Apply versioned SQLite schema migrations.")
     db_sub.add_parser("doctor", help="Validate required SQLite tables, columns, and indexes.")
+
+    notifications = sub.add_parser("notifications", help="Inspect notification state safely.")
+    notification_sub = notifications.add_subparsers(dest="notifications_command", required=True)
+    notification_sub.add_parser("status", help="Summarize notification outbox and channel state.")
+
+    channel_state = notification_sub.add_parser("channel-state", help="Inspect or reset channel quarantine.")
+    channel_state_sub = channel_state.add_subparsers(dest="channel_state_command", required=True)
+    channel_state_sub.add_parser("list", help="List channel state using destination hashes only.")
+    channel_reset = channel_state_sub.add_parser("reset", help="Reset a quarantined destination hash.")
+    channel_reset.add_argument("--channel", choices=["telegram", "discord"], required=True)
+    channel_reset.add_argument("--destination-hash", required=True)
+    channel_reset.add_argument("--confirm", action="store_true")
+
+    outbox = notification_sub.add_parser("outbox", help="Inspect or drain notification outbox rows.")
+    outbox_sub = outbox.add_subparsers(dest="outbox_command", required=True)
+    outbox_list = outbox_sub.add_parser("list", help="List outbox rows.")
+    outbox_list.add_argument(
+        "--status",
+        choices=["pending", "claimed", "delivered", "failed_retryable", "failed_terminal", "suppressed"],
+        default=None,
+    )
+    outbox_drain = outbox_sub.add_parser("drain", help="Drain pending/retryable outbox rows.")
+    outbox_drain.add_argument("--max", dest="max_rows", type=int, default=10)
+    outbox_drain.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -240,6 +266,123 @@ def _db(args: argparse.Namespace, settings: Settings) -> int:
     raise ConfigError(f"Unknown db command: {args.db_command}")
 
 
+def _notifications(args: argparse.Namespace, settings: Settings) -> int:
+    store = SQLiteStore(settings.database_path)
+    if args.notifications_command == "status":
+        _print_json(
+            {
+                "database_path": str(settings.database_path),
+                "notifications_enabled": settings.notifications_enabled,
+                "telegram_enabled": settings.telegram_enabled,
+                "discord_webhook_enabled": settings.discord_webhook_enabled,
+                **store.notification_status_summary(),
+            }
+        )
+        return 0
+    if args.notifications_command == "channel-state":
+        return _notifications_channel_state(args, store)
+    if args.notifications_command == "outbox":
+        return _notifications_outbox(args, settings, store)
+    raise ConfigError(f"Unknown notifications command: {args.notifications_command}")
+
+
+def _notifications_channel_state(args: argparse.Namespace, store: SQLiteStore) -> int:
+    if args.channel_state_command == "list":
+        _print_json(
+            {
+                "channel_state": [
+                    _channel_state_row_to_dict(row)
+                    for row in store.list_notification_channel_states()
+                ],
+                "destination_policy": "Destinations are shown as hashes only.",
+            }
+        )
+        return 0
+    if args.channel_state_command == "reset":
+        if not args.confirm:
+            print("Channel-state reset requires --confirm.", file=sys.stderr)
+            return 2
+        deleted = store.reset_notification_channel_state(args.channel, args.destination_hash)
+        _print_json(
+            {
+                "channel": args.channel,
+                "destination_hash": args.destination_hash,
+                "reset_rows": deleted,
+                "destination_policy": "Destination hash only. No token or webhook URL was printed.",
+            }
+        )
+        return 0
+    raise ConfigError(f"Unknown channel-state command: {args.channel_state_command}")
+
+
+def _notifications_outbox(args: argparse.Namespace, settings: Settings, store: SQLiteStore) -> int:
+    if args.outbox_command == "list":
+        _print_json(
+            {
+                "outbox": [
+                    _outbox_row_to_dict(row)
+                    for row in store.list_notification_outbox(status=args.status)
+                ],
+                "destination_policy": "Destinations are shown as hashes only.",
+            }
+        )
+        return 0
+    if args.outbox_command == "drain":
+        return _notifications_outbox_drain(args, settings, store)
+    raise ConfigError(f"Unknown outbox command: {args.outbox_command}")
+
+
+def _notifications_outbox_drain(args: argparse.Namespace, settings: Settings, store: SQLiteStore) -> int:
+    rows = _drainable_outbox_rows(store, limit=args.max_rows)
+    if args.dry_run:
+        _print_json(
+            {
+                "dry_run": True,
+                "would_drain": [_outbox_row_to_dict(row) for row in rows],
+                "terminal_rows_excluded": True,
+                "research_warning": "Dry run only. No notification was sent.",
+            }
+        )
+        return 0
+    if not settings.notifications_enabled:
+        _print_json(
+            {
+                "drained": [],
+                "skipped": [_outbox_row_to_dict(row) for row in rows],
+                "error": "Notifications are disabled.",
+            }
+        )
+        return 1
+    notifiers = _configured_notifiers(settings)
+    delivered: list[dict[str, object]] = []
+    skipped: list[dict[str, object]] = []
+    for row in rows:
+        notifier = _matching_notifier(notifiers, str(row["channel"]), str(row["destination_hash"]))
+        event = store.fetch_alert_event(str(row["alert_event_id"]))
+        if notifier is None or event is None:
+            skipped.append(_outbox_row_to_dict(row))
+            continue
+        dispatcher = NotificationDispatcher(
+            True,
+            [notifier],
+            channel_state_store=SQLiteNotificationChannelStateStore(store),
+            outbox_store=store,
+        )
+        for pair_event, result in dispatcher.dispatch_with_events([event]):
+            store.insert_notification_delivery(delivery_record(result, pair_event.alert_event_id))
+            delivered.append(
+                {
+                    "outbox_id": row["id"],
+                    "alert_event_id": pair_event.alert_event_id,
+                    "channel": result.channel,
+                    "status": result.status,
+                    "error_code": result.error_code,
+                }
+            )
+    _print_json({"drained": delivered, "skipped": skipped})
+    return 0
+
+
 def _score_from_store(
     store: SQLiteStore,
     exchange: str,
@@ -366,6 +509,58 @@ def _configured_notifiers(settings: Settings, channel: str | None = None) -> lis
     if not notifiers and channel == "noop":
         notifiers.append(NoopNotifier())
     return notifiers
+
+
+def _print_json(payload: dict[str, object]) -> None:
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def _channel_state_row_to_dict(row: Any) -> dict[str, object]:
+    return {
+        "channel": row["channel"],
+        "destination_hash": row["destination_hash"],
+        "status": row["status"],
+        "last_error_code": row["last_error_code"],
+        "last_error_at_utc": row["last_error_at_utc"],
+        "retry_after_until_utc": row["retry_after_until_utc"],
+        "manual_reset_required": bool(row["manual_reset_required"]),
+    }
+
+
+def _outbox_row_to_dict(row: Any) -> dict[str, object]:
+    return {
+        "id": row["id"],
+        "alert_event_id": row["alert_event_id"],
+        "channel": row["channel"],
+        "destination_hash": row["destination_hash"],
+        "status": row["status"],
+        "created_at_utc": row["created_at_utc"],
+        "claimed_at_utc": row["claimed_at_utc"],
+        "completed_at_utc": row["completed_at_utc"],
+        "retry_count": row["retry_count"],
+        "last_error_code": row["last_error_code"],
+    }
+
+
+def _drainable_outbox_rows(store: SQLiteStore, *, limit: int) -> list[Any]:
+    rows = [
+        *store.list_notification_outbox(status="pending"),
+        *store.list_notification_outbox(status="failed_retryable"),
+    ]
+    rows.sort(key=lambda row: str(row["created_at_utc"]))
+    return rows[: max(0, limit)]
+
+
+def _matching_notifier(notifiers: list[Notifier], channel: str, expected_destination_hash: str) -> Notifier | None:
+    for notifier in notifiers:
+        notifier_channel = getattr(notifier, "channel", "unknown")
+        destination = notifier_destination(notifier)
+        if (
+            notifier_channel == channel
+            and destination_hash(notifier_channel, destination) == expected_destination_hash
+        ):
+            return notifier
+    return None
 
 
 def _exchange_client(exchange: str, settings: Settings) -> PublicMarketDataClient:

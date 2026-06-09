@@ -6,7 +6,9 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
+from crypto_signal_bot.alerts.schemas import AlertEvent
 from crypto_signal_bot.data.models import Candle
 
 
@@ -578,7 +580,8 @@ class SQLiteStore:
             row = conn.execute(
                 """
                 SELECT id FROM notification_outbox
-                WHERE alert_event_id=? AND channel=? AND destination_hash=? AND status='pending'
+                WHERE alert_event_id=? AND channel=? AND destination_hash=?
+                  AND status IN ('pending', 'failed_retryable')
                 """,
                 (alert_event_id, channel, destination_hash),
             ).fetchone()
@@ -594,6 +597,27 @@ class SQLiteStore:
                 (claimed_at_utc, outbox_id),
             )
         return outbox_id
+
+    def list_notification_outbox(
+        self,
+        *,
+        status: str | None = None,
+        limit: int | None = None,
+    ) -> list[sqlite3.Row]:
+        self.init_schema()
+        sql = """
+            SELECT * FROM notification_outbox
+        """
+        params: list[object] = []
+        if status is not None:
+            sql += " WHERE status=?"
+            params.append(status)
+        sql += " ORDER BY created_at_utc ASC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        with self.connect() as conn:
+            return list(conn.execute(sql, params))
 
     def complete_notification_outbox(
         self,
@@ -629,6 +653,17 @@ class SQLiteStore:
                     outbox_id,
                 ),
             )
+
+    def fetch_alert_event(self, alert_event_id: str) -> AlertEvent | None:
+        self.init_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM alert_events WHERE id=?",
+                (alert_event_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return _row_to_alert_event(json.loads(str(row["payload_json"])))
 
     def get_notification_channel_state(
         self,
@@ -678,6 +713,54 @@ class SQLiteStore:
                     int(manual_reset_required),
                 ),
             )
+
+    def list_notification_channel_states(self) -> list[sqlite3.Row]:
+        self.init_schema()
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT * FROM notification_channel_state
+                    ORDER BY channel, destination_hash
+                    """
+                )
+            )
+
+    def reset_notification_channel_state(self, channel: str, destination_hash: str) -> int:
+        self.init_schema()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM notification_channel_state
+                WHERE channel=? AND destination_hash=?
+                """,
+                (channel, destination_hash),
+            )
+            return int(cursor.rowcount)
+
+    def notification_status_summary(self) -> dict[str, object]:
+        self.init_schema()
+        with self.connect() as conn:
+            outbox_rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM notification_outbox
+                GROUP BY status
+                ORDER BY status
+                """
+            ).fetchall()
+            channel_rows = conn.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM notification_channel_state
+                GROUP BY status
+                ORDER BY status
+                """
+            ).fetchall()
+        return {
+            "outbox": {str(row["status"]): int(row["count"]) for row in outbox_rows},
+            "channel_state": {str(row["status"]): int(row["count"]) for row in channel_rows},
+        }
 
 
 def _quote_like(exchange: str, quote: str) -> str:
@@ -739,4 +822,32 @@ def _row_to_candle(row: sqlite3.Row) -> Candle:
         quote_volume=None if row["quote_volume"] is None else float(row["quote_volume"]),
         trade_count=None if row["trade_count"] is None else int(row["trade_count"]),
         is_closed=bool(row["is_closed"]),
+    )
+
+
+def _row_to_alert_event(payload: dict[str, Any]) -> AlertEvent:
+    drivers_payload = payload.get("drivers", [])
+    risk_flags_payload = payload.get("risk_flags", [])
+    drivers = drivers_payload if isinstance(drivers_payload, list) else []
+    risk_flags = risk_flags_payload if isinstance(risk_flags_payload, list) else []
+    return AlertEvent(
+        alert_event_id=str(payload["alert_event_id"]),
+        created_at_utc=datetime.fromisoformat(str(payload["created_at_utc"])),
+        exchange=str(payload["exchange"]),
+        symbol=str(payload["symbol"]),
+        interval=str(payload["interval"]),
+        event_type=str(payload["event_type"]),
+        severity=str(payload["severity"]),
+        score=float(payload["score"]),
+        previous_score=None if payload["previous_score"] is None else float(payload["previous_score"]),
+        confidence=str(payload["confidence"]),
+        current_price=None if payload["current_price"] is None else float(payload["current_price"]),
+        rank=None if payload["rank"] is None else int(payload["rank"]),
+        drivers=[str(item) for item in drivers],
+        risk_flags=[str(item) for item in risk_flags],
+        invalidation_condition=str(payload["invalidation_condition"]),
+        data_timestamp_utc=str(payload["data_timestamp_utc"]),
+        dedupe_key=str(payload["dedupe_key"]),
+        source_run_id=str(payload["source_run_id"]),
+        notification_status=str(payload.get("notification_status", "pending")),
     )
