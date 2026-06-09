@@ -17,27 +17,41 @@ class NotificationDispatcher:
     notifiers: list[Notifier] = field(default_factory=lambda: [NoopNotifier()])
 
     def dispatch(self, events: list[AlertEvent]) -> list[NotificationResult]:
+        return [result for _, result in self.dispatch_with_events(events)]
+
+    def dispatch_with_events(self, events: list[AlertEvent]) -> list[tuple[AlertEvent, NotificationResult]]:
         if not events:
             return []
         if not self.notifications_enabled:
             return [
-                NotificationResult("noop", "skipped", "disabled", error_message="Notifications disabled.")
-                for _ in events
+                (
+                    event,
+                    NotificationResult(
+                        "noop",
+                        "skipped",
+                        "disabled",
+                        error_message="Notifications disabled.",
+                    ),
+                )
+                for event in events
             ]
-        results: list[NotificationResult] = []
+        results: list[tuple[AlertEvent, NotificationResult]] = []
         for event in events:
             for notifier in self.notifiers:
                 try:
-                    results.append(notifier.send(event))
+                    results.append((event, notifier.send(event)))
                 except Exception as exc:  # Notification failures must remain isolated.
                     safe_error = redact_secrets(exc)
                     LOGGER.warning("Notification adapter failed: %s", safe_error)
                     results.append(
-                        NotificationResult(
-                            getattr(notifier, "channel", "unknown"),
-                            "failed",
-                            "unknown",
-                            error_message=safe_error,
+                        (
+                            event,
+                            NotificationResult(
+                                getattr(notifier, "channel", "unknown"),
+                                "failed",
+                                "unknown",
+                                error_message=safe_error,
+                            ),
                         )
                     )
         return results

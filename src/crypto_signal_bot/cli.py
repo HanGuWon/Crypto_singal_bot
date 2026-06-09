@@ -6,6 +6,7 @@ import sys
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from crypto_signal_bot.alerts.delivery_log import delivery_record
 from crypto_signal_bot.alerts.dispatcher import NotificationDispatcher
 from crypto_signal_bot.alerts.formatter import format_telegram_event
 from crypto_signal_bot.alerts.policy import AlertPolicy, AlertPolicyConfig
@@ -247,8 +248,17 @@ def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None
         state_store=SQLiteAlertStateStore(settings.database_path),
     )
     events = policy.evaluate(candidates)
-    results = NotificationDispatcher(True, notifiers).dispatch(events)
-    print(f"Ranking completed; {len(events)} alert events evaluated, {len(results)} delivery attempts.")
+    dispatcher = NotificationDispatcher(True, notifiers)
+    delivery_results = dispatcher.dispatch_with_events(events)
+    store = SQLiteStore(settings.database_path)
+    for event in events:
+        store.insert_alert_event(event)
+    for event, result in delivery_results:
+        store.insert_notification_delivery(delivery_record(result, event.alert_event_id))
+    print(
+        f"Ranking completed; {len(events)} alert events evaluated, "
+        f"{len(delivery_results)} delivery attempts recorded."
+    )
 
 
 def _configured_notifiers(settings: Settings, channel: str | None = None) -> list[object]:

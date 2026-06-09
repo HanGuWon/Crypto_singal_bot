@@ -9,7 +9,10 @@ from crypto_signal_bot.signals.schemas import SignalCandidate
 
 def make_dedupe_key(candidate: SignalCandidate, event_type: str) -> str:
     score_bucket = int(candidate.score // 5) * 5
-    driver_text = "|".join(sorted(candidate.drivers[:5]))
+    driver_parts = sorted(candidate.drivers[:5])
+    if candidate.risk_flags:
+        driver_parts.extend(f"risk:{flag}" for flag in sorted(candidate.risk_flags[:5]))
+    driver_text = "|".join(driver_parts)
     driver_hash = hashlib.sha256(driver_text.encode("utf-8")).hexdigest()[:12]
     return (
         f"{candidate.exchange}:{candidate.symbol}:{candidate.interval}:"

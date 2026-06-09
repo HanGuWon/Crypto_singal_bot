@@ -169,6 +169,7 @@ class SQLiteStore:
         return [str(row["symbol"]) for row in rows]
 
     def insert_alert_event(self, event: object) -> None:
+        self.init_schema()
         payload = event.to_dict()  # type: ignore[attr-defined]
         with self.connect() as conn:
             conn.execute(
@@ -193,6 +194,29 @@ class SQLiteStore:
                     json.dumps(payload),
                     payload["dedupe_key"],
                     payload["source_run_id"],
+                ),
+            )
+
+    def insert_notification_delivery(self, record: dict[str, object]) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO notification_deliveries VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["id"],
+                    record["alert_event_id"],
+                    record["channel"],
+                    record["destination"],
+                    record["status"],
+                    record["attempted_at_utc"],
+                    record["delivered_at_utc"],
+                    record["error_code"],
+                    record["error_message"],
+                    record["retry_count"],
+                    json.dumps(record["provider_response"]),
                 ),
             )
 

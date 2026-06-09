@@ -14,6 +14,8 @@ class AlertState:
     last_score: float | None = None
     last_dedupe_key: str | None = None
     last_alerted_at_utc: datetime | None = None
+    entered_at_utc: datetime | None = None
+    exited_at_utc: datetime | None = None
 
 
 class AlertStateStore(Protocol):
@@ -61,6 +63,10 @@ class InMemoryAlertStateStore:
         state.last_dedupe_key = dedupe_key
         if alerted_at_utc is not None:
             state.last_alerted_at_utc = alerted_at_utc
+            if active:
+                state.entered_at_utc = alerted_at_utc
+            else:
+                state.exited_at_utc = alerted_at_utc
 
 
 class SQLiteAlertStateStore:
@@ -72,7 +78,7 @@ class SQLiteAlertStateStore:
         with self.store.connect() as conn:
             row = conn.execute(
                 """
-                SELECT active, last_alerted_at_utc, last_score, last_dedupe_key
+                SELECT active, entered_at_utc, exited_at_utc, last_alerted_at_utc, last_score, last_dedupe_key
                 FROM alert_state
                 WHERE exchange=? AND symbol=? AND interval=? AND event_type=?
                 """,
@@ -90,6 +96,12 @@ class SQLiteAlertStateStore:
             last_score=None if row["last_score"] is None else float(row["last_score"]),
             last_dedupe_key=row["last_dedupe_key"],
             last_alerted_at_utc=last_alerted,
+            entered_at_utc=(
+                datetime.fromisoformat(row["entered_at_utc"]) if row["entered_at_utc"] else None
+            ),
+            exited_at_utc=(
+                datetime.fromisoformat(row["exited_at_utc"]) if row["exited_at_utc"] else None
+            ),
         )
 
     def set_active(
@@ -116,13 +128,17 @@ class SQLiteAlertStateStore:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(exchange, symbol, interval, event_type) DO UPDATE SET
                   active=excluded.active,
+                  entered_at_utc=CASE
+                    WHEN excluded.active=1 THEN excluded.entered_at_utc
+                    ELSE alert_state.entered_at_utc
+                  END,
                   exited_at_utc=CASE
                     WHEN excluded.active=0 THEN excluded.exited_at_utc
                     ELSE alert_state.exited_at_utc
                   END,
                   last_alerted_at_utc=COALESCE(excluded.last_alerted_at_utc, alert_state.last_alerted_at_utc),
                   last_score=excluded.last_score,
-                  last_dedupe_key=COALESCE(excluded.last_dedupe_key, alert_state.last_dedupe_key)
+                  last_dedupe_key=excluded.last_dedupe_key
                 """,
                 (
                     exchange,

@@ -70,6 +70,17 @@ class AlertPolicy:
             or candidate.data_quality_status != "pass"
             or "stale_data" in candidate.risk_flags
         ):
+            event = self._event(
+                candidate,
+                "INVALIDATION",
+                "WARNING",
+                previous_score,
+                now,
+                risk_flags=candidate.risk_flags or ["score_below_exit_threshold"],
+            )
+            invalidation_state = self.state_store.get(
+                candidate.exchange, candidate.symbol, candidate.interval, "INVALIDATION"
+            )
             self.state_store.set_active(
                 candidate.exchange,
                 candidate.symbol,
@@ -79,21 +90,47 @@ class AlertPolicy:
                 score=candidate.score,
                 alerted_at_utc=now,
             )
-            return [
-                self._event(
-                    candidate,
+            if self._state_allows_event(invalidation_state, event, now):
+                self.state_store.set_active(
+                    candidate.exchange,
+                    candidate.symbol,
+                    candidate.interval,
                     "INVALIDATION",
-                    "WARNING",
-                    previous_score,
-                    now,
-                    risk_flags=candidate.risk_flags or ["score_below_exit_threshold"],
+                    active=True,
+                    score=candidate.score,
+                    dedupe_key=event.dedupe_key,
+                    alerted_at_utc=now,
                 )
-            ]
+                return [event]
+            return []
 
+        risk_state = self.state_store.get(
+            candidate.exchange, candidate.symbol, candidate.interval, "RISK_WARNING"
+        )
         if severe_risk and state.active:
-            return [
-                self._event(candidate, "RISK_WARNING", "WARNING", previous_score, now)
-            ]
+            event = self._event(candidate, "RISK_WARNING", "WARNING", previous_score, now)
+            if self._state_allows_event(risk_state, event, now):
+                self.state_store.set_active(
+                    candidate.exchange,
+                    candidate.symbol,
+                    candidate.interval,
+                    "RISK_WARNING",
+                    active=True,
+                    score=candidate.score,
+                    dedupe_key=event.dedupe_key,
+                    alerted_at_utc=now,
+                )
+                return [event]
+            return []
+        if not severe_risk and risk_state.active:
+            self.state_store.set_active(
+                candidate.exchange,
+                candidate.symbol,
+                candidate.interval,
+                "RISK_WARNING",
+                active=False,
+                score=candidate.score,
+            )
 
         if not _eligible_for_upside_alert(candidate):
             return []
@@ -114,6 +151,14 @@ class AlertPolicy:
                     score=candidate.score,
                     dedupe_key=event.dedupe_key,
                     alerted_at_utc=now,
+                )
+                self.state_store.set_active(
+                    candidate.exchange,
+                    candidate.symbol,
+                    candidate.interval,
+                    "INVALIDATION",
+                    active=False,
+                    score=candidate.score,
                 )
 
         if (
@@ -206,11 +251,16 @@ class AlertPolicy:
         return events
 
     def _state_allows_event(self, state: AlertState, event: AlertEvent, now: datetime) -> bool:
-        if state.last_dedupe_key == event.dedupe_key:
-            return False
         if state.last_alerted_at_utc is None:
             return True
-        return now - state.last_alerted_at_utc >= timedelta(minutes=self.config.cooldown_minutes)
+        cooldown_elapsed = now - state.last_alerted_at_utc >= timedelta(
+            minutes=self.config.cooldown_minutes
+        )
+        if not cooldown_elapsed:
+            return False
+        if state.active and state.last_dedupe_key == event.dedupe_key:
+            return False
+        return True
 
     def _event(
         self,
