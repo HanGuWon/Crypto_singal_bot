@@ -65,6 +65,8 @@ class Settings:
     alert_digest_interval_minutes: int = 60
     alert_global_max_per_minute: int = 10
     alert_per_symbol_max_per_hour: int = 1
+    alert_safety_global_max_per_minute: int = 5
+    alert_safety_per_symbol_max_per_hour: int = 3
 
     def validate_safety(self) -> None:
         if self.live_trading_enabled:
@@ -129,6 +131,8 @@ def load_settings() -> Settings:
         alert_digest_interval_minutes=int(_env("ALERT_DIGEST_INTERVAL_MINUTES", "60")),
         alert_global_max_per_minute=int(_env("ALERT_GLOBAL_MAX_PER_MINUTE", "10")),
         alert_per_symbol_max_per_hour=int(_env("ALERT_PER_SYMBOL_MAX_PER_HOUR", "1")),
+        alert_safety_global_max_per_minute=int(_env("ALERT_SAFETY_GLOBAL_MAX_PER_MINUTE", "5")),
+        alert_safety_per_symbol_max_per_hour=int(_env("ALERT_SAFETY_PER_SYMBOL_MAX_PER_HOUR", "3")),
     )
     settings.validate_safety()
     return settings

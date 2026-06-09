@@ -82,6 +82,33 @@ CREATE TABLE IF NOT EXISTS notification_deliveries (
   provider_response_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS notification_outbox (
+  id TEXT PRIMARY KEY,
+  alert_event_id TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  destination_hash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  claimed_at_utc TEXT,
+  completed_at_utc TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  last_error_code TEXT,
+  last_error_message TEXT,
+  provider_response_json TEXT,
+  UNIQUE(alert_event_id, channel, destination_hash)
+);
+
+CREATE TABLE IF NOT EXISTS notification_channel_state (
+  channel TEXT NOT NULL,
+  destination_hash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  last_error_code TEXT,
+  last_error_at_utc TEXT,
+  retry_after_until_utc TEXT,
+  manual_reset_required INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(channel, destination_hash)
+);
+
 CREATE TABLE IF NOT EXISTS alert_state (
   exchange TEXT NOT NULL,
   symbol TEXT NOT NULL,
@@ -226,9 +253,27 @@ class SQLiteStore:
             row = conn.execute(
                 """
                 SELECT COUNT(DISTINCT alert_event_id) AS count
-                FROM notification_deliveries
-                WHERE attempted_at_utc >= ?
-                  AND status != 'suppressed_by_rate_limit'
+                FROM notification_deliveries d
+                JOIN alert_events e ON e.id = d.alert_event_id
+                WHERE d.attempted_at_utc >= ?
+                  AND d.status != 'suppressed_by_rate_limit'
+                """,
+                (since_utc,),
+            ).fetchone()
+        return int(row["count"])
+
+    def count_recent_notification_events_by_priority(self, since_utc: str, priority: str) -> int:
+        self.init_schema()
+        priority_sql = _priority_sql(priority)
+        with self.connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT d.alert_event_id) AS count
+                FROM notification_deliveries d
+                JOIN alert_events e ON e.id = d.alert_event_id
+                WHERE d.attempted_at_utc >= ?
+                  AND d.status != 'suppressed_by_rate_limit'
+                  AND {priority_sql}
                 """,
                 (since_utc,),
             ).fetchone()
@@ -258,11 +303,185 @@ class SQLiteStore:
             ).fetchone()
         return int(row["count"])
 
+    def count_recent_symbol_notification_events_by_priority(
+        self,
+        exchange: str,
+        symbol: str,
+        interval: str,
+        since_utc: str,
+        priority: str,
+    ) -> int:
+        self.init_schema()
+        priority_sql = _priority_sql(priority)
+        with self.connect() as conn:
+            row = conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT d.alert_event_id) AS count
+                FROM notification_deliveries d
+                JOIN alert_events e ON e.id = d.alert_event_id
+                WHERE d.attempted_at_utc >= ?
+                  AND d.status != 'suppressed_by_rate_limit'
+                  AND e.exchange = ?
+                  AND e.symbol = ?
+                  AND e.interval = ?
+                  AND {priority_sql}
+                """,
+                (since_utc, exchange, symbol, interval),
+            ).fetchone()
+        return int(row["count"])
+
+    def insert_notification_outbox(
+        self,
+        *,
+        alert_event_id: str,
+        channel: str,
+        destination_hash: str,
+        created_at_utc: str,
+    ) -> str:
+        self.init_schema()
+        outbox_id = f"{alert_event_id}:{channel}:{destination_hash[:16]}"
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO notification_outbox VALUES
+                (?, ?, ?, ?, 'pending', ?, NULL, NULL, 0, NULL, NULL, NULL)
+                """,
+                (outbox_id, alert_event_id, channel, destination_hash, created_at_utc),
+            )
+        return outbox_id
+
+    def claim_notification_outbox(
+        self,
+        *,
+        alert_event_id: str,
+        channel: str,
+        destination_hash: str,
+        claimed_at_utc: str,
+    ) -> str | None:
+        self.init_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM notification_outbox
+                WHERE alert_event_id=? AND channel=? AND destination_hash=? AND status='pending'
+                """,
+                (alert_event_id, channel, destination_hash),
+            ).fetchone()
+            if row is None:
+                return None
+            outbox_id = str(row["id"])
+            conn.execute(
+                """
+                UPDATE notification_outbox
+                SET status='claimed', claimed_at_utc=?
+                WHERE id=?
+                """,
+                (claimed_at_utc, outbox_id),
+            )
+        return outbox_id
+
+    def complete_notification_outbox(
+        self,
+        *,
+        outbox_id: str,
+        status: str,
+        completed_at_utc: str,
+        retry_count: int,
+        last_error_code: str | None,
+        last_error_message: str | None,
+        provider_response: object,
+    ) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE notification_outbox
+                SET status=?,
+                    completed_at_utc=?,
+                    retry_count=?,
+                    last_error_code=?,
+                    last_error_message=?,
+                    provider_response_json=?
+                WHERE id=?
+                """,
+                (
+                    status,
+                    completed_at_utc,
+                    retry_count,
+                    last_error_code,
+                    last_error_message,
+                    json.dumps(provider_response),
+                    outbox_id,
+                ),
+            )
+
+    def get_notification_channel_state(
+        self,
+        channel: str,
+        destination_hash: str,
+    ) -> sqlite3.Row | None:
+        self.init_schema()
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM notification_channel_state
+                WHERE channel=? AND destination_hash=?
+                """,
+                (channel, destination_hash),
+            ).fetchone()
+
+    def upsert_notification_channel_state(
+        self,
+        *,
+        channel: str,
+        destination_hash: str,
+        status: str,
+        last_error_code: str | None,
+        last_error_at_utc: str | None,
+        retry_after_until_utc: str | None,
+        manual_reset_required: bool,
+    ) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO notification_channel_state VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel, destination_hash) DO UPDATE SET
+                  status=excluded.status,
+                  last_error_code=excluded.last_error_code,
+                  last_error_at_utc=excluded.last_error_at_utc,
+                  retry_after_until_utc=excluded.retry_after_until_utc,
+                  manual_reset_required=excluded.manual_reset_required
+                """,
+                (
+                    channel,
+                    destination_hash,
+                    status,
+                    last_error_code,
+                    last_error_at_utc,
+                    retry_after_until_utc,
+                    int(manual_reset_required),
+                ),
+            )
+
 
 def _quote_like(exchange: str, quote: str) -> str:
     if exchange == "upbit":
         return f"{quote}-%"
     return f"%{quote}"
+
+
+def _priority_sql(priority: str) -> str:
+    safety_condition = (
+        "(e.severity IN ('WARNING', 'CRITICAL') "
+        "OR e.event_type IN ('RISK_WARNING', 'INVALIDATION', "
+        "'DATA_QUALITY_WARNING', 'SYSTEM_ERROR'))"
+    )
+    if priority == "safety":
+        return safety_condition
+    if priority == "watch":
+        return f"NOT {safety_condition}"
+    raise ValueError(f"Unknown notification priority: {priority}")
 
 
 def _row_to_candle(row: sqlite3.Row) -> Candle:

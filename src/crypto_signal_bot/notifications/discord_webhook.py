@@ -37,6 +37,9 @@ class DiscordWebhookNotifier:
         if self.http_client is None:
             raise RuntimeError("httpx is required for DiscordWebhookNotifier.")
 
+    def destination_key(self) -> str:
+        return self.webhook_url
+
     def send(self, event: AlertEvent) -> NotificationResult:
         payload = format_discord_payload(
             event,

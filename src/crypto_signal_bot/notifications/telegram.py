@@ -37,6 +37,9 @@ class TelegramNotifier:
         if self.http_client is None:
             raise RuntimeError("httpx is required for TelegramNotifier.")
 
+    def destination_key(self) -> str:
+        return f"{self.chat_id}:{self.bot_token}"
+
     def send(self, event: AlertEvent) -> NotificationResult:
         text = format_telegram_event(event)
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from crypto_signal_bot.alerts.channel_state import SQLiteNotificationChannelStateStore
 from crypto_signal_bot.alerts.delivery_log import delivery_record, suppressed_delivery_record
 from crypto_signal_bot.alerts.dispatcher import NotificationDispatcher
 from crypto_signal_bot.alerts.formatter import format_telegram_event
@@ -23,6 +24,7 @@ from crypto_signal_bot.exchanges.upbit import UpbitPublicClient
 from crypto_signal_bot.features.feature_builder import build_feature_snapshot
 from crypto_signal_bot.logging_config import configure_logging
 from crypto_signal_bot.notifications.base import Notifier
+from crypto_signal_bot.notifications.destinations import destination_hash, notifier_destination
 from crypto_signal_bot.notifications.discord_webhook import DiscordWebhookNotifier
 from crypto_signal_bot.notifications.noop import NoopNotifier
 from crypto_signal_bot.notifications.telegram import TelegramNotifier
@@ -159,13 +161,23 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
 
     quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
     store = SQLiteStore(settings.database_path)
+    mocked_candles = None
     if args.mock:
-        store.upsert_candles(make_mock_candles(args.exchange, quote, args.interval, limit=120))
-    symbols = store.list_symbols(args.exchange, quote, args.interval)
+        mocked_candles = make_mock_candles(args.exchange, quote, args.interval, limit=120)
+        store.upsert_candles(mocked_candles)
+    symbols = (
+        sorted({candle.symbol for candle in mocked_candles})
+        if mocked_candles is not None
+        else store.list_symbols(args.exchange, quote, args.interval)
+    )
     if not symbols:
         print("No stored candles found. Run collect first or use --mock.")
         return 1
-    candles = store.fetch_candles(args.exchange, symbols[0], args.interval)
+    candles = (
+        [candle for candle in mocked_candles if candle.symbol == symbols[0]]
+        if mocked_candles is not None
+        else store.fetch_candles(args.exchange, symbols[0], args.interval)
+    )
     signal_indices = list(range(50, max(50, len(candles) - 5), 20))
     metrics = event_study_next_open(candles, signal_indices)
     print(json.dumps(metrics, indent=2))
@@ -263,14 +275,31 @@ def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None
         store,
         global_max_per_minute=settings.alert_global_max_per_minute,
         per_symbol_max_per_hour=settings.alert_per_symbol_max_per_hour,
+        safety_global_max_per_minute=settings.alert_safety_global_max_per_minute,
+        safety_per_symbol_max_per_hour=settings.alert_safety_per_symbol_max_per_hour,
     )
     allowed_events, suppressed_events = limiter.filter_events(events)
     for event in events:
         store.insert_alert_event(event)
     for decision in suppressed_events:
         store.insert_notification_delivery(suppressed_delivery_record(decision))
+    for event in allowed_events:
+        for notifier in notifiers:
+            channel = getattr(notifier, "channel", "unknown")
+            destination = notifier_destination(notifier)
+            store.insert_notification_outbox(
+                alert_event_id=event.alert_event_id,
+                channel=channel,
+                destination_hash=destination_hash(channel, destination),
+                created_at_utc=datetime.now(tz=UTC).isoformat(),
+            )
 
-    dispatcher = NotificationDispatcher(True, notifiers)
+    dispatcher = NotificationDispatcher(
+        True,
+        notifiers,
+        channel_state_store=SQLiteNotificationChannelStateStore(store),
+        outbox_store=store,
+    )
     delivery_results = dispatcher.dispatch_with_events(allowed_events)
     for event, result in delivery_results:
         store.insert_notification_delivery(delivery_record(result, event.alert_event_id))

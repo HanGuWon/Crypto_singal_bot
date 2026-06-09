@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
+from crypto_signal_bot.alerts.channel_state import SQLiteNotificationChannelStateStore, suppression_result
 from crypto_signal_bot.alerts.schemas import AlertEvent
+from crypto_signal_bot.data.store import SQLiteStore
 from crypto_signal_bot.logging_config import redact_secrets
 from crypto_signal_bot.notifications.base import NotificationResult, Notifier
+from crypto_signal_bot.notifications.destinations import destination_hash, notifier_destination
 from crypto_signal_bot.notifications.noop import NoopNotifier
 
 LOGGER = logging.getLogger(__name__)
@@ -15,6 +19,8 @@ LOGGER = logging.getLogger(__name__)
 class NotificationDispatcher:
     notifications_enabled: bool = False
     notifiers: list[Notifier] = field(default_factory=lambda: [NoopNotifier()])
+    channel_state_store: SQLiteNotificationChannelStateStore | None = None
+    outbox_store: SQLiteStore | None = None
 
     def dispatch(self, events: list[AlertEvent]) -> list[NotificationResult]:
         return [result for _, result in self.dispatch_with_events(events)]
@@ -38,20 +44,68 @@ class NotificationDispatcher:
         results: list[tuple[AlertEvent, NotificationResult]] = []
         for event in events:
             for notifier in self.notifiers:
+                channel = getattr(notifier, "channel", "unknown")
+                destination = notifier_destination(notifier)
+                outbox_id = self._claim_outbox(event, channel, destination)
                 try:
-                    results.append((event, notifier.send(event)))
+                    suppression = (
+                        self.channel_state_store.suppression_for(channel, destination)
+                        if self.channel_state_store is not None
+                        else None
+                    )
+                    if suppression is not None:
+                        result = suppression_result(channel, suppression)
+                    else:
+                        result = notifier.send(event)
+                        if self.channel_state_store is not None:
+                            self.channel_state_store.record_result(channel, destination, result)
+                    self._complete_outbox(outbox_id, result)
+                    results.append((event, result))
                 except Exception as exc:  # Notification failures must remain isolated.
                     safe_error = redact_secrets(exc)
                     LOGGER.warning("Notification adapter failed: %s", safe_error)
-                    results.append(
-                        (
-                            event,
-                            NotificationResult(
-                                getattr(notifier, "channel", "unknown"),
-                                "failed",
-                                "unknown",
-                                error_message=safe_error,
-                            ),
-                        )
+                    result = NotificationResult(
+                        channel,
+                        "failed",
+                        "unknown",
+                        error_message=safe_error,
                     )
+                    self._complete_outbox(outbox_id, result)
+                    results.append((event, result))
         return results
+
+    def _claim_outbox(self, event: AlertEvent, channel: str, destination: str) -> str | None:
+        if self.outbox_store is None:
+            return None
+        return self.outbox_store.claim_notification_outbox(
+            alert_event_id=event.alert_event_id,
+            channel=channel,
+            destination_hash=destination_hash(channel, destination),
+            claimed_at_utc=datetime.now(tz=UTC).isoformat(),
+        )
+
+    def _complete_outbox(self, outbox_id: str | None, result: NotificationResult) -> None:
+        if self.outbox_store is None or outbox_id is None:
+            return
+        safe_result = result.to_safe_dict()
+        self.outbox_store.complete_notification_outbox(
+            outbox_id=outbox_id,
+            status=_outbox_status(result),
+            completed_at_utc=datetime.now(tz=UTC).isoformat(),
+            retry_count=result.retry_count,
+            last_error_code=result.error_code,
+            last_error_message=(
+                str(safe_result["error_message"]) if safe_result["error_message"] else None
+            ),
+            provider_response=safe_result["provider_response"],
+        )
+
+
+def _outbox_status(result: NotificationResult) -> str:
+    if result.status == "delivered":
+        return "delivered"
+    if result.status.startswith("suppressed"):
+        return "suppressed"
+    if result.error_code in {"401", "403", "404"}:
+        return "failed_terminal"
+    return "failed_retryable"

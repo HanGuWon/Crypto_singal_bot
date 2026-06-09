@@ -31,3 +31,12 @@ Research wording:
 - Outputs use candidate, watchlist, score, drivers, and risk flags.
 - Outputs must not claim certainty or profit prediction.
 - Alerts include: `Research alert only. Not financial advice. No order was placed.`
+
+Repository governance:
+
+- Configure GitHub branch protection or a ruleset for `main`.
+- Require the `test` GitHub Actions job.
+- Require pull requests and at least one review.
+- Disable force pushes and branch deletions.
+- Apply the rule to administrators when practical.
+- Consider signed commits if this repository is shared beyond a private research workflow.

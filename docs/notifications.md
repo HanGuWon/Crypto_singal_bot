@@ -36,7 +36,12 @@ Dedupe, cooldown, and hysteresis:
 - Hysteresis enters at the alert threshold and exits only below the exit threshold.
 - Global notification limits cap event fan-out per minute.
 - Per-symbol notification limits cap repeated alerts per hour.
+- Safety-priority warnings use separate bounded quota from normal watchlist alerts.
 - Rate-limited events are saved with `suppressed_by_rate_limit` delivery status for audit.
+- Terminal channel failures such as Telegram 401/403 and Discord 401/403/404 are quarantined in
+  `notification_channel_state` until manual reset/configuration repair.
+- The CLI creates `notification_outbox` rows before provider sends, then claims and completes those
+  rows during dispatch.
 
 Telegram:
 

@@ -99,6 +99,9 @@ The `--notify` flag does nothing unless global notifications and at least one co
 enabled. Alerts are research output only and cannot influence scoring, ranking, or backtesting.
 Before dispatch, alert events are saved locally and filtered by the configured global and per-symbol
 notification rate limits. Rate-limited alerts are recorded with `suppressed_by_rate_limit` status.
+Safety-priority alerts such as risk warnings and invalidations use a separate bounded quota so they
+are not blocked by earlier watchlist alerts. Terminal Telegram/Discord authorization or destination
+failures are quarantined in local channel state until configuration is fixed.
 
 Telegram placeholders:
 
@@ -136,7 +139,7 @@ development.
 - This is an MVP screener, not a production research platform.
 - Live collection is REST-only; WebSocket support is intentionally absent for now.
 - Backtesting is a leakage-safe smoke engine, not a full portfolio simulator yet.
-- Notification delivery audit is persistent for the CLI path, but a full durable outbox worker is
+- Notification delivery audit includes a CLI outbox path, but a long-running outbox worker/daemon is
   still a production follow-up.
 - Scoring is interpretable and deterministic but not a profit prediction.
 - Cross-exchange normalization is not implemented.

@@ -14,6 +14,8 @@ def test_default_config_is_research_only() -> None:
     assert settings.notifications_enabled is False
     assert settings.telegram_enabled is False
     assert settings.discord_webhook_enabled is False
+    assert settings.alert_safety_global_max_per_minute == 5
+    assert settings.alert_safety_per_symbol_max_per_hour == 3
 
 
 def test_unsafe_modes_fail_closed() -> None:

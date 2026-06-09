@@ -11,6 +11,9 @@ LOGGER = logging.getLogger(__name__)
 class NoopNotifier:
     channel = "noop"
 
+    def destination_key(self) -> str:
+        return "noop"
+
     def send(self, event: AlertEvent) -> NotificationResult:
         LOGGER.info("Notification skipped or simulated for %s %s", event.exchange, event.symbol)
         return NotificationResult(channel=self.channel, status="skipped", destination="noop")
