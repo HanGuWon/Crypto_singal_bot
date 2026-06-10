@@ -20,7 +20,7 @@ and the specific channel are enabled.
 AlertPolicy handles:
 
 - score threshold crossing
-- top-N entry
+- top-N entry when the candidate also meets the alert score threshold
 - score acceleration
 - breakout watch
 - risk warning

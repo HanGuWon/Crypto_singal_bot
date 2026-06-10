@@ -168,7 +168,7 @@ class AlertPolicy:
         if (
             candidate.rank is not None
             and candidate.rank <= self.config.top_n
-            and candidate.score >= self.config.exit_threshold
+            and candidate.score >= self.config.score_threshold
             and (previous_rank is None or previous_rank > self.config.top_n)
         ):
             top_state = self.state_store.get(

@@ -53,6 +53,18 @@ def test_missing_orderbook_suppresses_upside_alert() -> None:
     assert AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70}) == []
 
 
+def test_top_n_entry_requires_alert_score_threshold() -> None:
+    candidate = make_candidate(score=70.0, rank=1, confidence="medium")
+
+    events = AlertPolicy().evaluate(
+        [candidate],
+        previous_scores={"BTCUSDT": 68},
+        previous_ranks={"BTCUSDT": 25},
+    )
+
+    assert not any(event.event_type == "TOP_N_ENTRY" for event in events)
+
+
 def test_entry_timing_blocking_status_suppresses_upside_alert() -> None:
     candidate = make_candidate(
         confidence="medium",
