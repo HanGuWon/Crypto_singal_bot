@@ -109,6 +109,8 @@ python -m crypto_signal_bot.cli exit-guard signal --exchange binance_usdm_future
 python -m crypto_signal_bot.cli exit-guard signal --exchange binance_usdm_futures --symbol BTCUSDT --interval 5m --exposure-side short --confirmation-intervals 15m,30m --mock-candles
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --save-event
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_short --side BUY --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --request-approval
+python -m crypto_signal_bot.cli exit-guard signals list --limit 10
+python -m crypto_signal_bot.cli exit-guard signals show SIGNAL_ID
 python -m crypto_signal_bot.cli exit-guard events list --limit 10
 python -m crypto_signal_bot.cli exit-guard events show ALERT_EVENT_ID
 python -m crypto_signal_bot.cli exit-guard approvals list --status pending

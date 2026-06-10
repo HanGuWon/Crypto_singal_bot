@@ -302,6 +302,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     signal.add_argument("--save-event", action="store_true")
     signal.add_argument("--notify", action="store_true")
+    signals = exit_guard_sub.add_parser("signals", help="Inspect saved protective exit signal snapshots.")
+    signals_sub = signals.add_subparsers(dest="exit_guard_signals_command", required=True)
+    signals_list = signals_sub.add_parser("list", help="List saved protective exit signal snapshots.")
+    signals_list.add_argument("--limit", type=int, default=20)
+    signals_show = signals_sub.add_parser("show", help="Show one saved protective exit signal snapshot.")
+    signals_show.add_argument("signal_id")
     events = exit_guard_sub.add_parser("events", help="Inspect saved protective exit dry-run events.")
     events_sub = events.add_subparsers(dest="exit_guard_events_command", required=True)
     events_list = events_sub.add_parser("list", help="List saved protective exit events.")
@@ -976,6 +982,8 @@ def _exit_guard(args: argparse.Namespace, settings: Settings) -> int:
         return _exit_guard_preflight(args, settings)
     if args.exit_guard_command == "signal":
         return _exit_guard_signal(args, settings)
+    if args.exit_guard_command == "signals":
+        return _exit_guard_signals(args, settings)
     if args.exit_guard_command == "events":
         return _exit_guard_events(args, settings)
     if args.exit_guard_command == "approvals":
@@ -1199,6 +1207,27 @@ def _exit_guard_signal(args: argparse.Namespace, settings: Settings) -> int:
     )
     event_saved = bool(persistence["event_saved"])
     delivery_audit_count = int(persistence["delivery_audit_count"])
+    saved_signal_id = None
+    if event_saved:
+        store.insert_protective_exit_signal(
+            _protective_exit_signal_record(
+                signal=combined_signal,
+                diagnostics=diagnostics,
+                exposure_side=args.exposure_side,
+                source_alert_event_id=event.alert_event_id,
+                payload={
+                    "primary_signal": _exit_guard_signal_to_dict(signal),
+                    "combined_signal": _exit_guard_signal_to_dict(combined_signal),
+                    "confirmation_signals": confirmation_payloads,
+                    "data_quality": _data_quality_to_dict(quality),
+                    "research_warning": (
+                        "Protective exit guard public-candle dry-run research only. "
+                        "Not financial advice. No order was placed."
+                    ),
+                },
+            )
+        )
+        saved_signal_id = combined_signal.signal_id
     _print_json(
         {
             "dry_run": True,
@@ -1221,6 +1250,8 @@ def _exit_guard_signal(args: argparse.Namespace, settings: Settings) -> int:
             "alert_event": event.to_dict(),
             "saved_event": event_saved,
             "saved_alert_event_id": event.alert_event_id if event_saved else None,
+            "saved_signal": saved_signal_id is not None,
+            "saved_signal_id": saved_signal_id,
             "notification_note": persistence["notification_note"],
             "notification_results": persistence["notification_results"],
             "delivery_audit_recorded": delivery_audit_count > 0,
@@ -1286,6 +1317,88 @@ def _persist_and_maybe_dispatch_exit_guard_event(
         "notification_results": notification_results,
         "delivery_audit_count": delivery_audit_count,
     }
+
+
+def _protective_exit_signal_record(
+    *,
+    signal: ProtectiveExitSignal,
+    diagnostics: TrendBreakDiagnostics,
+    exposure_side: str,
+    source_alert_event_id: str,
+    payload: dict[str, object],
+) -> dict[str, object]:
+    return {
+        "id": signal.signal_id,
+        "created_at_utc": signal.created_at_utc.astimezone(UTC).isoformat(),
+        "exchange": signal.exchange,
+        "symbol": signal.symbol,
+        "interval": signal.interval,
+        "exposure_side": exposure_side,
+        "state": signal.state,
+        "exit_score": signal.exit_score,
+        "data_quality_status": signal.data_quality_status,
+        "data_timestamp_utc": signal.created_at_utc.astimezone(UTC).isoformat(),
+        "source_alert_event_id": source_alert_event_id,
+        "drivers": signal.drivers,
+        "risk_flags": signal.risk_flags,
+        "diagnostics": _trend_break_diagnostics_to_dict(diagnostics),
+        "payload": payload,
+    }
+
+
+def _exit_guard_signals(args: argparse.Namespace, settings: Settings) -> int:
+    store = SQLiteStore(settings.database_path)
+    if args.exit_guard_signals_command == "list":
+        rows = store.list_protective_exit_signals(limit=args.limit)
+        _print_json(
+            {
+                "signals": [_protective_exit_signal_row_to_dict(row, include_payload=False) for row in rows],
+                "count": len(rows),
+                "research_warning": (
+                    "Protective exit guard signal audit inspection only. Not financial advice. "
+                    "No order was placed."
+                ),
+            }
+        )
+        return 0
+    if args.exit_guard_signals_command == "show":
+        row = store.fetch_protective_exit_signal(args.signal_id)
+        if row is None:
+            print("Protective exit signal not found.", file=sys.stderr)
+            return 1
+        _print_json(
+            {
+                "signal": _protective_exit_signal_row_to_dict(row),
+                "research_warning": (
+                    "Protective exit guard signal audit inspection only. Not financial advice. "
+                    "No order was placed."
+                ),
+            }
+        )
+        return 0
+    raise ConfigError(f"Unknown exit-guard signals command: {args.exit_guard_signals_command}")
+
+
+def _protective_exit_signal_row_to_dict(row: Any, *, include_payload: bool = True) -> dict[str, object]:
+    data: dict[str, object] = {
+        "id": row["id"],
+        "created_at_utc": row["created_at_utc"],
+        "exchange": row["exchange"],
+        "symbol": row["symbol"],
+        "interval": row["interval"],
+        "exposure_side": row["exposure_side"],
+        "state": row["state"],
+        "exit_score": row["exit_score"],
+        "data_quality_status": row["data_quality_status"],
+        "data_timestamp_utc": row["data_timestamp_utc"],
+        "source_alert_event_id": row["source_alert_event_id"],
+        "drivers": json.loads(str(row["drivers_json"])),
+        "risk_flags": json.loads(str(row["risk_flags_json"])),
+        "diagnostics": json.loads(str(row["diagnostics_json"])),
+    }
+    if include_payload:
+        data["payload"] = json.loads(str(row["payload_json"]))
+    return data
 
 
 def _exit_guard_symbol_allowlist_status(

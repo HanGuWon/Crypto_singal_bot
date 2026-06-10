@@ -237,6 +237,29 @@ CREATE INDEX IF NOT EXISTS idx_entry_timing_snapshots_status
 ON entry_timing_snapshots(status, research_priority_score);
 """
 
+PROTECTIVE_EXIT_SIGNAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS protective_exit_signals (
+  id TEXT PRIMARY KEY,
+  created_at_utc TEXT NOT NULL,
+  exchange TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  interval TEXT NOT NULL,
+  exposure_side TEXT NOT NULL,
+  state TEXT NOT NULL,
+  exit_score REAL NOT NULL,
+  data_quality_status TEXT NOT NULL,
+  data_timestamp_utc TEXT,
+  source_alert_event_id TEXT,
+  drivers_json TEXT NOT NULL,
+  risk_flags_json TEXT NOT NULL,
+  diagnostics_json TEXT NOT NULL,
+  payload_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_protective_exit_signals_lookup
+ON protective_exit_signals(created_at_utc, exchange, symbol, interval, state);
+"""
+
 MANUAL_APPROVAL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS manual_approval_requests (
   id TEXT PRIMARY KEY,
@@ -289,6 +312,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(5, "entry_timing_snapshots", _split_sql_script(ENTRY_TIMING_SCHEMA)),
     Migration(6, "manual_approval_requests", _split_sql_script(MANUAL_APPROVAL_SCHEMA)),
     Migration(7, "manual_approval_binding_hash", _split_sql_script(MANUAL_APPROVAL_BINDING_SCHEMA)),
+    Migration(8, "protective_exit_signals", _split_sql_script(PROTECTIVE_EXIT_SIGNAL_SCHEMA)),
 )
 
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -450,6 +474,23 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "risk_flags_json",
         "payload_json",
     },
+    "protective_exit_signals": {
+        "id",
+        "created_at_utc",
+        "exchange",
+        "symbol",
+        "interval",
+        "exposure_side",
+        "state",
+        "exit_score",
+        "data_quality_status",
+        "data_timestamp_utc",
+        "source_alert_event_id",
+        "drivers_json",
+        "risk_flags_json",
+        "diagnostics_json",
+        "payload_json",
+    },
     "manual_approval_requests": {
         "id",
         "created_at_utc",
@@ -481,6 +522,7 @@ REQUIRED_INDEXES = {
     "idx_feature_snapshots_run",
     "idx_entry_timing_snapshots_run",
     "idx_entry_timing_snapshots_status",
+    "idx_protective_exit_signals_lookup",
     "idx_manual_approval_status_expiry",
     "idx_manual_approval_binding",
 }
@@ -936,6 +978,74 @@ class SQLiteStore:
                     (run_id,),
                 )
             )
+
+    def insert_protective_exit_signal(self, record: dict[str, object]) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO protective_exit_signals VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  created_at_utc=excluded.created_at_utc,
+                  exchange=excluded.exchange,
+                  symbol=excluded.symbol,
+                  interval=excluded.interval,
+                  exposure_side=excluded.exposure_side,
+                  state=excluded.state,
+                  exit_score=excluded.exit_score,
+                  data_quality_status=excluded.data_quality_status,
+                  data_timestamp_utc=excluded.data_timestamp_utc,
+                  source_alert_event_id=excluded.source_alert_event_id,
+                  drivers_json=excluded.drivers_json,
+                  risk_flags_json=excluded.risk_flags_json,
+                  diagnostics_json=excluded.diagnostics_json,
+                  payload_json=excluded.payload_json
+                """,
+                (
+                    record["id"],
+                    record["created_at_utc"],
+                    record["exchange"],
+                    record["symbol"],
+                    record["interval"],
+                    record["exposure_side"],
+                    record["state"],
+                    record["exit_score"],
+                    record["data_quality_status"],
+                    record["data_timestamp_utc"],
+                    record["source_alert_event_id"],
+                    json.dumps(record["drivers"]),
+                    json.dumps(record["risk_flags"]),
+                    json.dumps(record["diagnostics"]),
+                    json.dumps(record["payload"]),
+                ),
+            )
+
+    def list_protective_exit_signals(self, limit: int = 20) -> list[sqlite3.Row]:
+        self.init_schema()
+        row_limit = max(0, limit)
+        if row_limit == 0:
+            return []
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT *
+                    FROM protective_exit_signals
+                    ORDER BY created_at_utc DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (row_limit,),
+                )
+            )
+
+    def fetch_protective_exit_signal(self, signal_id: str) -> sqlite3.Row | None:
+        self.init_schema()
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM protective_exit_signals WHERE id=?",
+                (signal_id,),
+            ).fetchone()
 
     def list_research_runs(self, limit: int = 20) -> list[sqlite3.Row]:
         self.init_schema()

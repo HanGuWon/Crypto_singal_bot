@@ -100,6 +100,8 @@ python -m crypto_signal_bot.cli exit-guard signal --exchange binance_usdm_future
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook
 python -m crypto_signal_bot.cli exit-guard preflight --exchange upbit_spot --symbol KRW-BTC --action sell_only --side ask --quantity 0.01 --mock-orderbook --save-event --notify
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_short --side BUY --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --request-approval
+python -m crypto_signal_bot.cli exit-guard signals list --limit 10
+python -m crypto_signal_bot.cli exit-guard signals show SIGNAL_ID
 python -m crypto_signal_bot.cli exit-guard events list --limit 10
 python -m crypto_signal_bot.cli exit-guard events show ALERT_EVENT_ID
 python -m crypto_signal_bot.cli exit-guard approvals list --status pending
@@ -124,7 +126,8 @@ passes. Approval decisions are records only; they do not unlock live execution.
 The `exit-guard signal` command builds a public-candle trend-break research signal before any
 orderbook preflight. It reads stored candles or deterministic mock candles, ignores open candles,
 can include optional confirmation intervals, and can save the resulting `AlertEvent` for audit. It
-does not read balances or positions and does not create approval requests.
+also stores a dedicated protective-exit signal snapshot when saving or notifying. It does not read
+balances or positions and does not create approval requests.
 
 Database maintenance:
 

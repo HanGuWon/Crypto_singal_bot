@@ -139,12 +139,27 @@ def test_cli_exit_guard_signal_mock_outputs_and_saves_public_candle_event(
     assert payload["confirmation_signals"][0]["interval"] == "15m"
     assert payload["alert_event"]["event_type"].startswith("PROTECTIVE_EXIT_")
     assert payload["saved_event"] is True
+    assert payload["saved_signal"] is True
+    assert payload["saved_signal_id"] == payload["signal"]["signal_id"]
     assert "No order was placed" in payload["research_warning"]
     assert "buy now" not in json.dumps(payload).lower()
 
     saved = SQLiteStore(db_path).fetch_alert_event(payload["saved_alert_event_id"])
     assert saved is not None
     assert saved.source_run_id == payload["signal"]["signal_id"]
+    signal_row = SQLiteStore(db_path).fetch_protective_exit_signal(payload["saved_signal_id"])
+    assert signal_row is not None
+    assert signal_row["source_alert_event_id"] == payload["saved_alert_event_id"]
+
+    assert main(["exit-guard", "signals", "list", "--limit", "5"]) == 0
+    list_payload = json.loads(capsys.readouterr().out)
+    assert list_payload["count"] == 1
+    assert list_payload["signals"][0]["id"] == payload["saved_signal_id"]
+
+    assert main(["exit-guard", "signals", "show", payload["saved_signal_id"]]) == 0
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_payload["signal"]["id"] == payload["saved_signal_id"]
+    assert show_payload["signal"]["payload"]["combined_signal"]["signal_id"] == payload["saved_signal_id"]
 
 
 def test_cli_exit_guard_signal_without_candles_safety_blocks(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -173,6 +188,7 @@ def test_cli_exit_guard_signal_without_candles_safety_blocks(tmp_path, monkeypat
     assert payload["signal"]["data_quality_status"] == "fail"
     assert payload["alert_event"]["event_type"] == "PROTECTIVE_EXIT_BLOCKED"
     assert payload["saved_event"] is False
+    assert payload["saved_signal"] is False
 
 
 def test_cli_exit_guard_blocks_unallowlisted_symbol_before_manual_approval(

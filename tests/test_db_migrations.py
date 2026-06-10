@@ -45,6 +45,7 @@ def test_upgrade_from_pre_outbox_schema(tmp_path) -> None:
     assert _table_exists(db_path, "feature_snapshots")
     assert _table_exists(db_path, "entry_timing_snapshots")
     assert _table_exists(db_path, "manual_approval_requests")
+    assert _table_exists(db_path, "protective_exit_signals")
 
 
 def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
@@ -61,6 +62,7 @@ def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
     assert _table_exists(db_path, "feature_snapshots")
     assert _table_exists(db_path, "entry_timing_snapshots")
     assert _table_exists(db_path, "manual_approval_requests")
+    assert _table_exists(db_path, "protective_exit_signals")
 
 
 def test_upgrade_from_manual_approval_schema_without_binding_hash(tmp_path) -> None:
@@ -73,10 +75,12 @@ def test_upgrade_from_manual_approval_schema_without_binding_hash(tmp_path) -> N
 
     applied = store.run_migrations()
 
-    assert applied == [7]
+    assert applied == [7, 8]
     store.validate_schema()
     assert _column_exists(db_path, "manual_approval_requests", "binding_hash")
     assert _index_exists(db_path, "idx_manual_approval_binding")
+    assert _table_exists(db_path, "protective_exit_signals")
+    assert _index_exists(db_path, "idx_protective_exit_signals_lookup")
 
 
 def test_entry_timing_snapshot_insert_is_idempotent(tmp_path) -> None:
@@ -107,6 +111,39 @@ def test_entry_timing_snapshot_insert_is_idempotent(tmp_path) -> None:
     assert len(rows) == 1
     assert rows[0]["status"] == "confirmed_candidate"
     assert rows[0]["entry_timing_score"] == 88.0
+
+
+def test_protective_exit_signal_insert_is_idempotent(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "protective_exit_signals.sqlite")
+    record = {
+        "id": "exit-signal-1",
+        "created_at_utc": "2026-01-01T00:00:00+00:00",
+        "exchange": "binance_usdm_futures",
+        "symbol": "BTCUSDT",
+        "interval": "5m",
+        "exposure_side": "long",
+        "state": "WARNING",
+        "exit_score": 42.0,
+        "data_quality_status": "pass",
+        "data_timestamp_utc": "2026-01-01T00:00:00+00:00",
+        "source_alert_event_id": "alert-1",
+        "drivers": ["closed_candle_trend_break_engine"],
+        "risk_flags": [],
+        "diagnostics": {"state": "WARNING"},
+        "payload": {"research_warning": "Protective exit guard dry-run research only."},
+    }
+
+    store.insert_protective_exit_signal(record)
+    store.insert_protective_exit_signal({**record, "state": "EXIT_CANDIDATE", "exit_score": 66.0})
+
+    rows = store.list_protective_exit_signals(limit=5)
+    assert len(rows) == 1
+    assert rows[0]["id"] == "exit-signal-1"
+    assert rows[0]["state"] == "EXIT_CANDIDATE"
+    assert rows[0]["exit_score"] == 66.0
+    fetched = store.fetch_protective_exit_signal("exit-signal-1")
+    assert fetched is not None
+    assert fetched["source_alert_event_id"] == "alert-1"
 
 
 def test_candle_retention_prune_dry_run_and_execute(tmp_path) -> None:
