@@ -1485,16 +1485,41 @@ def _create_manual_approval_request(
 
 
 def _manual_approval_binding_hash(*, event: Any, intent: RiskReducingOrderIntent) -> str:
+    return _manual_approval_binding_hash_from_values(
+        exchange=intent.exchange,
+        symbol=intent.symbol,
+        interval=event.interval,
+        action=intent.action,
+        side=intent.side,
+        quantity=intent.quantity,
+        position_mode=intent.position_mode,
+        position_side=intent.position_side,
+        source_alert_event_id=event.alert_event_id,
+    )
+
+
+def _manual_approval_binding_hash_from_values(
+    *,
+    exchange: str,
+    symbol: str,
+    interval: str,
+    action: str,
+    side: str,
+    quantity: float,
+    position_mode: str | None,
+    position_side: str | None,
+    source_alert_event_id: str,
+) -> str:
     binding_payload = {
-        "exchange": intent.exchange,
-        "symbol": intent.symbol,
-        "interval": event.interval,
-        "action": intent.action,
-        "side": intent.side,
-        "quantity": intent.quantity,
-        "position_mode": intent.position_mode,
-        "position_side": intent.position_side,
-        "source_alert_event_id": event.alert_event_id,
+        "exchange": exchange,
+        "symbol": symbol,
+        "interval": interval,
+        "action": action,
+        "side": side,
+        "quantity": quantity,
+        "position_mode": position_mode,
+        "position_side": position_side,
+        "source_alert_event_id": source_alert_event_id,
     }
     canonical = json.dumps(binding_payload, sort_keys=True, separators=(",", ":"))
     return sha256(canonical.encode("utf-8")).hexdigest()
@@ -1575,6 +1600,13 @@ def _exit_guard_approvals(args: argparse.Namespace, settings: Settings) -> int:
             print("Manual approval decisions require --confirm.", file=sys.stderr)
             return 1
         status = "approved" if args.exit_guard_approvals_command == "approve" else "rejected"
+        row = store.fetch_manual_approval_request(args.request_id)
+        if row is None or row["status"] != "pending":
+            print("Manual approval request is missing, expired, or no longer pending.", file=sys.stderr)
+            return 1
+        if integrity_error := _manual_approval_integrity_error(row):
+            print(f"Manual approval binding integrity check failed: {integrity_error}.", file=sys.stderr)
+            return 1
         updated = store.decide_manual_approval_request(
             args.request_id,
             status=status,
@@ -1637,6 +1669,59 @@ def _manual_approval_row_to_dict(row: Any, *, include_payload: bool = True) -> d
     if include_payload:
         data["request_payload"] = json.loads(str(row["request_payload_json"]))
     return data
+
+
+def _manual_approval_integrity_error(row: Any) -> str | None:
+    binding_hash = str(row["binding_hash"] or "")
+    if not binding_hash:
+        return "missing binding hash"
+    try:
+        payload = json.loads(str(row["request_payload_json"]))
+    except json.JSONDecodeError:
+        return "invalid request payload JSON"
+    if not isinstance(payload, dict):
+        return "request payload is not an object"
+    if payload.get("binding_hash") != binding_hash:
+        return "stored binding hash does not match request payload"
+
+    expected_hash = _manual_approval_binding_hash_from_values(
+        exchange=str(row["exchange"]),
+        symbol=str(row["symbol"]),
+        interval=str(row["interval"]),
+        action=str(row["action"]),
+        side=str(row["side"]),
+        quantity=float(row["quantity"]),
+        position_mode=None if row["position_mode"] is None else str(row["position_mode"]),
+        position_side=None if row["position_side"] is None else str(row["position_side"]),
+        source_alert_event_id=str(row["source_alert_event_id"]),
+    )
+    if expected_hash != binding_hash:
+        return "binding hash does not match approval scope"
+    if payload.get("source_alert_event_id") != row["source_alert_event_id"]:
+        return "payload source alert event does not match approval row"
+
+    intent = payload.get("intent")
+    if not isinstance(intent, dict):
+        return "request payload intent is missing"
+    expected_intent = {
+        "exchange": row["exchange"],
+        "symbol": row["symbol"],
+        "action": row["action"],
+        "side": row["side"],
+        "position_mode": row["position_mode"],
+        "position_side": row["position_side"],
+    }
+    for key, expected_value in expected_intent.items():
+        if intent.get(key) != expected_value:
+            return f"payload intent {key} does not match approval row"
+    raw_quantity: Any = intent.get("quantity")
+    try:
+        payload_quantity = float(raw_quantity)
+    except (TypeError, ValueError):
+        return "payload intent quantity is invalid"
+    if payload_quantity != float(row["quantity"]):
+        return "payload intent quantity does not match approval row"
+    return None
 
 
 def _notification_delivery_row_to_dict(row: Any) -> dict[str, object]:

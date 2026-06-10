@@ -128,7 +128,8 @@ delivery attempt, failure, or disabled skip is recorded in `notification_deliver
 events show ALERT_EVENT_ID` includes the saved event and its notification delivery audit rows.
 `--request-approval` creates a bounded manual approval audit record with a binding hash for the
 source event, exchange, symbol, side, quantity, and position scope only when the public preflight
-passes. Approval decisions are records only; they do not unlock live execution.
+passes. Approval decisions re-check that binding before recording the decision. They are records
+only; they do not unlock live execution.
 
 The `exit-guard signal` command builds a public-candle trend-break research signal before any
 orderbook preflight. It reads stored candles or deterministic mock candles, ignores open candles,

@@ -538,6 +538,60 @@ def test_cli_exit_guard_manual_approval_request_is_audit_only(tmp_path, monkeypa
     assert "no longer pending" in capsys.readouterr().err
 
 
+def test_cli_exit_guard_manual_approval_rejects_tampered_binding(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    _allow_exit_guard_symbols(monkeypatch)
+
+    assert main(
+        [
+            "exit-guard",
+            "preflight",
+            "--exchange",
+            "binance_usdm_futures",
+            "--symbol",
+            "BTCUSDT",
+            "--action",
+            "close_long",
+            "--side",
+            "SELL",
+            "--quantity",
+            "2",
+            "--position-mode",
+            "one_way",
+            "--position-side",
+            "BOTH",
+            "--reduce-only",
+            "--mock-orderbook",
+            "--request-approval",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    request_id = payload["manual_approval_request"]["id"]
+    store = SQLiteStore(db_path)
+    with store.connect() as conn:
+        conn.execute(
+            """
+            UPDATE manual_approval_requests
+            SET quantity=3.0
+            WHERE id=?
+            """,
+            (request_id,),
+        )
+
+    assert main(["exit-guard", "approvals", "approve", request_id, "--confirm"]) == 1
+    assert "binding integrity check failed" in capsys.readouterr().err
+    row = store.fetch_manual_approval_request(request_id)
+    assert row is not None
+    assert row["status"] == "pending"
+    assert row["decided_at_utc"] is None
+
+
 def test_cli_rank_marks_insufficient_history(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("MIN_HISTORY_BARS", "120")

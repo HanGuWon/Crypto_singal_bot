@@ -131,10 +131,11 @@ secrets or sending an order.
 Adding `--request-approval` creates a manual approval request bound to the dry-run event and the
 validated risk-reducing intent. Each request stores a deterministic binding hash over the source
 event, exchange, symbol, action, side, quantity, position mode, and position side so later audit
-inspection can verify the approval scope. Approval requests expire, can be approved or rejected
-only with `--confirm`, and remain audit records only. Requests are not created when the public
-preflight is blocked, including when the symbol is not allowlisted. They do not enable private
-reads, live orders, sell orders, close orders, or any exchange endpoint.
+inspection can verify the approval scope. Approval decisions re-check that the stored row, request
+payload, and binding hash still match before they are recorded. Approval requests expire, can be
+approved or rejected only with `--confirm`, and remain audit records only. Requests are not created
+when the public preflight is blocked, including when the symbol is not allowlisted. They do not
+enable private reads, live orders, sell orders, close orders, or any exchange endpoint.
 
 ## Upbit Spot Sell-Only Shape
 
