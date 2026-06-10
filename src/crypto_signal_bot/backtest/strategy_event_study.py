@@ -9,7 +9,7 @@ from crypto_signal_bot.backtest.leakage_checks import assert_next_candle_entry
 from crypto_signal_bot.backtest.metrics import summarize_returns
 from crypto_signal_bot.data.models import Candle, DataQualityReport
 from crypto_signal_bot.features.bottoming import compute_bottoming_state
-from crypto_signal_bot.features.indicators import stochastic_cross_up, stochastic_kd
+from crypto_signal_bot.features.indicators import interval_to_minutes, stochastic_cross_up, stochastic_kd
 from crypto_signal_bot.features.three_tick import compute_three_tick_state
 from crypto_signal_bot.signals.entry_timing import EntryTimingConfig, EntryTimingScorer
 from crypto_signal_bot.signals.schemas import SignalCandidate
@@ -65,6 +65,12 @@ def strategy_event_study(
         "variant_summaries": summaries,
         "cost_sensitivity": _cost_sensitivity(candles_by_symbol, signal_records, cfg),
         "benchmark_diagnostics": _benchmark_diagnostics(
+            candles_by_symbol,
+            signal_records,
+            benchmark_symbol=benchmark_symbol,
+            config=cfg,
+        ),
+        "stress_diagnostics": _strategy_stress_diagnostics(
             candles_by_symbol,
             signal_records,
             benchmark_symbol=benchmark_symbol,
@@ -332,6 +338,182 @@ def _falling_knife_filter(
             if (ret := _forward_return(candles_by_symbol, record, horizon, config.round_trip_cost)) is not None
         ]),
     }
+
+
+def _strategy_stress_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_records: dict[str, list[dict[str, Any]]],
+    *,
+    benchmark_symbol: str | None,
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    horizon = config.horizons[0]
+    all_records = [record for records in signal_records.values() for record in records]
+    volatility_values = [
+        value
+        for record in all_records
+        if (value := _prior_realized_volatility(candles_by_symbol, record)) is not None
+    ]
+    liquidity_values = [
+        value
+        for record in all_records
+        if (value := _signal_quote_volume(candles_by_symbol, record)) is not None
+    ]
+    volatility_threshold = median(volatility_values) if volatility_values else None
+    liquidity_threshold = median(liquidity_values) if liquidity_values else None
+    return {
+        "strategy_event_stress_only": True,
+        "not_portfolio_simulator": True,
+        "horizon_bars": horizon,
+        "thresholds": {
+            "prior_realized_volatility_median": volatility_threshold,
+            "entry_quote_volume_median": liquidity_threshold,
+            "benchmark_drawdown_return_below": 0.0,
+            "api_outage_gap_multiple": 1.5,
+        },
+        "variant_slices": {
+            variant: _stress_slices_for_records(
+                candles_by_symbol,
+                records,
+                benchmark_symbol=benchmark_symbol,
+                config=config,
+                horizon_bars=horizon,
+                volatility_threshold=volatility_threshold,
+                liquidity_threshold=liquidity_threshold,
+            )
+            for variant, records in signal_records.items()
+        },
+    }
+
+
+def _stress_slices_for_records(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    *,
+    benchmark_symbol: str | None,
+    config: StrategyEventStudyConfig,
+    horizon_bars: int,
+    volatility_threshold: float | None,
+    liquidity_threshold: float | None,
+) -> dict[str, object]:
+    high_volatility_returns: list[float] = []
+    thin_liquidity_returns: list[float] = []
+    benchmark_drawdown_returns: list[float] = []
+    outage_returns: list[float] = []
+    non_outage_returns: list[float] = []
+    for record in records:
+        ret = _forward_return(candles_by_symbol, record, horizon_bars, config.round_trip_cost)
+        if ret is None:
+            continue
+        if _is_high_volatility_window(candles_by_symbol, record, volatility_threshold):
+            high_volatility_returns.append(ret)
+        if _is_thin_liquidity_window(candles_by_symbol, record, liquidity_threshold):
+            thin_liquidity_returns.append(ret)
+        if _benchmark_forward_return(candles_by_symbol, record, benchmark_symbol, horizon_bars) < 0:
+            benchmark_drawdown_returns.append(ret)
+        if _has_api_outage_gap(candles_by_symbol, record, horizon_bars):
+            outage_returns.append(ret)
+        else:
+            non_outage_returns.append(ret)
+    return {
+        "high_volatility_windows": summarize_returns(high_volatility_returns),
+        "thin_liquidity_windows": summarize_returns(thin_liquidity_returns),
+        "benchmark_drawdown_windows": summarize_returns(benchmark_drawdown_returns),
+        "api_outage_windows": {
+            "outage_flagged": summarize_returns(outage_returns),
+            "excluding_outage_flagged": summarize_returns(non_outage_returns),
+        },
+    }
+
+
+def _is_high_volatility_window(
+    candles_by_symbol: dict[str, list[Candle]],
+    record: dict[str, Any],
+    threshold: float | None,
+) -> bool:
+    value = _prior_realized_volatility(candles_by_symbol, record)
+    return threshold is not None and value is not None and value >= threshold
+
+
+def _is_thin_liquidity_window(
+    candles_by_symbol: dict[str, list[Candle]],
+    record: dict[str, Any],
+    threshold: float | None,
+) -> bool:
+    value = _signal_quote_volume(candles_by_symbol, record)
+    return threshold is not None and value is not None and value <= threshold
+
+
+def _prior_realized_volatility(
+    candles_by_symbol: dict[str, list[Candle]],
+    record: dict[str, Any],
+    *,
+    lookback: int = 20,
+) -> float | None:
+    candles = candles_by_symbol.get(str(record["symbol"]), [])
+    signal_index = int(record["signal_index"])
+    if signal_index <= 0 or signal_index >= len(candles):
+        return None
+    start = max(1, signal_index - lookback + 1)
+    returns: list[float] = []
+    for index in range(start, signal_index + 1):
+        previous = candles[index - 1]
+        current = candles[index]
+        if previous.close <= 0 or current.close <= 0:
+            return None
+        returns.append(current.close / previous.close - 1)
+    if len(returns) < 2:
+        return None
+    mean = sum(returns) / len(returns)
+    variance = sum((value - mean) ** 2 for value in returns) / len(returns)
+    return variance**0.5
+
+
+def _signal_quote_volume(
+    candles_by_symbol: dict[str, list[Candle]],
+    record: dict[str, Any],
+) -> float | None:
+    candles = candles_by_symbol.get(str(record["symbol"]), [])
+    entry_index = int(record["entry_index"])
+    if entry_index < 0 or entry_index >= len(candles):
+        return None
+    return candles[entry_index].quote_volume
+
+
+def _benchmark_forward_return(
+    candles_by_symbol: dict[str, list[Candle]],
+    record: dict[str, Any],
+    benchmark_symbol: str | None,
+    horizon_bars: int,
+) -> float:
+    if benchmark_symbol is None or benchmark_symbol not in candles_by_symbol:
+        return 0.0
+    ret = _symbol_forward_return(
+        candles_by_symbol[benchmark_symbol],
+        int(record["signal_index"]),
+        horizon_bars,
+        0.0,
+    )
+    return ret if ret is not None else 0.0
+
+
+def _has_api_outage_gap(
+    candles_by_symbol: dict[str, list[Candle]],
+    record: dict[str, Any],
+    horizon_bars: int,
+) -> bool:
+    candles = candles_by_symbol.get(str(record["symbol"]), [])
+    signal_index = int(record["signal_index"])
+    if signal_index <= 0 or signal_index >= len(candles):
+        return False
+    expected_seconds = interval_to_minutes(candles[signal_index].interval) * 60
+    first_index = max(1, signal_index - 3)
+    last_index = min(len(candles) - 1, int(record["entry_index"]) + horizon_bars)
+    for index in range(first_index, last_index + 1):
+        delta_seconds = (candles[index].open_time_utc - candles[index - 1].open_time_utc).total_seconds()
+        if delta_seconds > expected_seconds * 1.5:
+            return True
+    return False
 
 
 def _forward_return(

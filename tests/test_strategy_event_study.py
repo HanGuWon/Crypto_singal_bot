@@ -91,6 +91,33 @@ def test_strategy_benchmark_windows_are_point_in_time() -> None:
     assert "3" in diagnostics["universe_median_return"]
 
 
+def test_strategy_event_study_reports_stress_diagnostics() -> None:
+    universe = _strategy_universe()
+    universe["BTCUSDT"] = _shift_candles_from(universe["BTCUSDT"], start_index=35, minutes=5)
+
+    result = strategy_event_study(
+        universe,
+        benchmark_symbol="BTCUSDT",
+        config=StrategyEventStudyConfig(horizons=(1,), min_history_bars=20),
+    )
+
+    stress = result["stress_diagnostics"]
+    variant_slices = stress["variant_slices"]
+    confirmed = variant_slices["confirmed_entry_timing"]
+    outage_trades = sum(
+        item["api_outage_windows"]["outage_flagged"]["trades"]
+        for item in variant_slices.values()
+    )
+
+    assert stress["strategy_event_stress_only"] is True
+    assert stress["not_portfolio_simulator"] is True
+    assert "prior_realized_volatility_median" in stress["thresholds"]
+    assert confirmed["high_volatility_windows"]["trades"] >= 1
+    assert confirmed["thin_liquidity_windows"]["trades"] >= 1
+    assert "benchmark_drawdown_windows" in confirmed
+    assert outage_trades >= 1
+
+
 def test_strategy_output_avoids_forbidden_recommendation_language() -> None:
     text = json.dumps(
         strategy_event_study(
@@ -191,3 +218,20 @@ def _candle(
 
 def _replace_candle(candle: Candle, **overrides: object) -> Candle:
     return Candle(**{**candle.__dict__, **overrides})
+
+
+def _shift_candles_from(candles: list[Candle], *, start_index: int, minutes: int) -> list[Candle]:
+    shifted: list[Candle] = []
+    delta = timedelta(minutes=minutes)
+    for index, candle in enumerate(candles):
+        if index < start_index:
+            shifted.append(candle)
+            continue
+        shifted.append(
+            _replace_candle(
+                candle,
+                open_time_utc=candle.open_time_utc + delta,
+                close_time_utc=candle.close_time_utc + delta,
+            )
+        )
+    return shifted
