@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from crypto_signal_bot.data.models import OrderBook, PriceLevel
 from crypto_signal_bot.exit_guard.models import (
     BalanceSnapshot,
     ExitGuardValidationError,
     FuturesPositionSnapshot,
+    OrderBookSlippageAssessment,
     ProtectiveExitOrderRecord,
     ProtectiveExitSignal,
     RiskReducingOrderIntent,
+    assess_orderbook_slippage,
 )
 
 
@@ -189,3 +192,129 @@ def test_order_record_remains_dry_run_without_provider_order_id() -> None:
 
     assert record.provider_order_id is None
     assert "No order was placed" in record.audit_message
+
+
+def test_orderbook_slippage_passes_for_sufficient_sell_depth() -> None:
+    now = datetime.now(tz=UTC)
+    intent = RiskReducingOrderIntent(
+        exchange="upbit_spot",
+        symbol="KRW-BTC",
+        action="sell_only",
+        side="ask",
+        quantity=1.5,
+    )
+    orderbook = OrderBook(
+        exchange="upbit",
+        symbol="KRW-BTC",
+        event_time_utc=now,
+        bids=[PriceLevel(100.0, 1.0), PriceLevel(99.8, 1.0)],
+        asks=[PriceLevel(100.2, 1.0)],
+    )
+
+    assessment = assess_orderbook_slippage(
+        intent,
+        orderbook,
+        observed_at_utc=now,
+        max_slippage_pct=1.0,
+    )
+
+    assert assessment.passed
+    assert assessment.side == "SELL"
+    assert assessment.filled_quantity == 1.5
+    assert assessment.estimated_slippage_pct is not None
+    assert assessment.estimated_slippage_pct < 1.0
+
+
+def test_orderbook_slippage_blocks_missing_and_stale_orderbook() -> None:
+    now = datetime.now(tz=UTC)
+    intent = RiskReducingOrderIntent(
+        exchange="upbit_spot",
+        symbol="KRW-BTC",
+        action="sell_only",
+        side="ask",
+        quantity=1.0,
+    )
+
+    missing = assess_orderbook_slippage(intent, None, observed_at_utc=now)
+    stale = assess_orderbook_slippage(
+        intent,
+        OrderBook(
+            exchange="upbit",
+            symbol="KRW-BTC",
+            event_time_utc=now - timedelta(minutes=5),
+            bids=[PriceLevel(100.0, 1.0)],
+            asks=[PriceLevel(100.2, 1.0)],
+        ),
+        observed_at_utc=now,
+        max_orderbook_age_seconds=30,
+    )
+
+    assert missing.status == "blocked"
+    assert "missing_orderbook" in missing.risk_flags
+    assert stale.status == "blocked"
+    assert "stale_orderbook" in stale.risk_flags
+
+
+def test_orderbook_slippage_blocks_excessive_slippage_and_depth_exhaustion() -> None:
+    now = datetime.now(tz=UTC)
+    intent = RiskReducingOrderIntent(
+        exchange="binance_usdm_futures",
+        symbol="BTCUSDT",
+        action="close_long",
+        side="SELL",
+        quantity=3.0,
+        position_mode="one_way",
+        position_side="BOTH",
+        reduce_only=True,
+    )
+    orderbook = OrderBook(
+        exchange="binance",
+        symbol="BTCUSDT",
+        event_time_utc=now,
+        bids=[PriceLevel(100.0, 1.0), PriceLevel(95.0, 1.0)],
+        asks=[PriceLevel(100.2, 3.0)],
+    )
+
+    assessment = assess_orderbook_slippage(
+        intent,
+        orderbook,
+        observed_at_utc=now,
+        max_slippage_pct=1.0,
+    )
+
+    assert isinstance(assessment, OrderBookSlippageAssessment)
+    assert assessment.status == "blocked"
+    assert assessment.depth_exhausted
+    assert "orderbook_depth_exhausted" in assessment.risk_flags
+    assert "excessive_slippage" in assessment.risk_flags
+
+
+def test_orderbook_slippage_walks_asks_for_short_close() -> None:
+    now = datetime.now(tz=UTC)
+    intent = RiskReducingOrderIntent(
+        exchange="binance_usdm_futures",
+        symbol="BTCUSDT",
+        action="close_short",
+        side="BUY",
+        quantity=2.0,
+        position_mode="hedge",
+        position_side="SHORT",
+    )
+    orderbook = OrderBook(
+        exchange="binance",
+        symbol="BTCUSDT",
+        event_time_utc=now,
+        bids=[PriceLevel(99.8, 2.0)],
+        asks=[PriceLevel(100.0, 1.0), PriceLevel(100.3, 1.0)],
+    )
+
+    assessment = assess_orderbook_slippage(
+        intent,
+        orderbook,
+        observed_at_utc=now,
+        max_slippage_pct=1.0,
+    )
+
+    assert assessment.passed
+    assert assessment.side == "BUY"
+    assert assessment.average_price == pytest.approx(100.15)

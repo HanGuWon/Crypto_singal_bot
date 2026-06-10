@@ -34,6 +34,24 @@ EXIT_GUARD_TELEGRAM_ENABLED=false
 
 In this MVP, enabling private reads or live exits fails closed during config validation.
 
+## Public Orderbook Slippage Preflight
+
+The phase-1 code can assess a dry-run protective intent against a public orderbook snapshot before
+any future human review. This is a research safety check only. It does not read balances, does not
+open private sessions, and does not submit orders.
+
+The preflight blocks when:
+
+- no public orderbook snapshot is available
+- the snapshot is stale or timestamped in the future
+- the relevant bid or ask side has no usable depth
+- visible depth cannot cover the requested quantity
+- estimated adverse slippage is above the configured threshold
+
+For sell-only spot review and close-long futures review, the preflight walks public bids. For
+close-short futures review, it walks public asks. The result is an assessment with `pass` or
+`blocked` status, estimated slippage, filled quantity, and risk flags for audit output.
+
 ## Upbit Spot Sell-Only Shape
 
 A future Upbit protective action may only reduce an already-held spot asset. The only allowed
@@ -82,7 +100,7 @@ See `docs/discord_exit_alerts.md` for the dedicated notification boundary.
 
 ## Rollout Phases
 
-1. Design foundation only: config, models, validation, documentation.
+1. Design foundation only: config, models, validation, public orderbook preflight, documentation.
 2. Dry-run signal generation from closed public candles only.
 3. Private read adapters for balances/positions only, still no live orders.
 4. Exchange order-test or testnet-only validation, still no live orders.

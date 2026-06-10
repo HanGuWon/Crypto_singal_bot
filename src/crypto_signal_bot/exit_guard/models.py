@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from crypto_signal_bot.data.models import ensure_utc
+from crypto_signal_bot.data.models import OrderBook, PriceLevel, ensure_utc
 
 
 class ExitGuardValidationError(ValueError):
@@ -103,6 +103,23 @@ class RiskReducingOrderIntent:
 
 
 @dataclass(frozen=True)
+class OrderBookSlippageAssessment:
+    status: str
+    side: str
+    requested_quantity: float
+    filled_quantity: float
+    reference_price: float | None
+    average_price: float | None
+    estimated_slippage_pct: float | None
+    depth_exhausted: bool
+    risk_flags: list[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        return self.status == "pass"
+
+
+@dataclass(frozen=True)
 class ProtectiveExitOrderRecord:
     record_id: str
     signal_id: str
@@ -119,6 +136,50 @@ class ProtectiveExitOrderRecord:
             raise ExitGuardValidationError("Provider order ids are not created in the MVP dry-run foundation.")
 
 
+def assess_orderbook_slippage(
+    intent: RiskReducingOrderIntent,
+    orderbook: OrderBook | None,
+    *,
+    observed_at_utc: datetime,
+    max_orderbook_age_seconds: int = 30,
+    max_slippage_pct: float = 1.0,
+) -> OrderBookSlippageAssessment:
+    observed_at = ensure_utc(observed_at_utc)
+    side = _market_side_for_intent(intent)
+    if orderbook is None:
+        return _blocked_slippage_assessment(intent, side, ["missing_orderbook"])
+
+    age_seconds = (observed_at - orderbook.event_time_utc).total_seconds()
+    if age_seconds < 0 or age_seconds > max_orderbook_age_seconds:
+        return _blocked_slippage_assessment(intent, side, ["stale_orderbook"])
+
+    levels = _depth_levels_for_side(orderbook, side)
+    reference_price = levels[0].price if levels else None
+    if reference_price is None or reference_price <= 0:
+        return _blocked_slippage_assessment(intent, side, ["missing_orderbook_depth"])
+
+    filled_quantity, notional = _walk_orderbook_levels(levels, intent.quantity)
+    depth_exhausted = filled_quantity + 1e-12 < intent.quantity
+    average_price = notional / filled_quantity if filled_quantity > 0 else None
+    slippage_pct = _adverse_slippage_pct(side, reference_price, average_price)
+    risk_flags: list[str] = []
+    if depth_exhausted:
+        risk_flags.append("orderbook_depth_exhausted")
+    if slippage_pct is not None and slippage_pct > max_slippage_pct:
+        risk_flags.append("excessive_slippage")
+    return OrderBookSlippageAssessment(
+        status="blocked" if risk_flags else "pass",
+        side=side,
+        requested_quantity=intent.quantity,
+        filled_quantity=filled_quantity,
+        reference_price=reference_price,
+        average_price=average_price,
+        estimated_slippage_pct=None if slippage_pct is None else round(slippage_pct, 6),
+        depth_exhausted=depth_exhausted,
+        risk_flags=risk_flags,
+    )
+
+
 def _validate_upbit_spot_sell_only(intent: RiskReducingOrderIntent) -> None:
     if intent.action != "sell_only":
         raise ExitGuardValidationError("Upbit protective exit supports sell_only action only.")
@@ -128,6 +189,64 @@ def _validate_upbit_spot_sell_only(intent: RiskReducingOrderIntent) -> None:
         raise ExitGuardValidationError("Upbit spot intents must not carry futures position fields.")
     if intent.reduce_only is True:
         raise ExitGuardValidationError("Upbit spot does not use reduce_only.")
+
+
+def _market_side_for_intent(intent: RiskReducingOrderIntent) -> str:
+    if intent.exchange == "upbit_spot":
+        return "SELL"
+    return intent.side
+
+
+def _depth_levels_for_side(orderbook: OrderBook, side: str) -> list[PriceLevel]:
+    if side == "SELL":
+        return sorted(orderbook.bids, key=lambda level: level.price, reverse=True)
+    if side == "BUY":
+        return sorted(orderbook.asks, key=lambda level: level.price)
+    raise ExitGuardValidationError(f"Unsupported protective exit market side: {side}")
+
+
+def _walk_orderbook_levels(levels: list[PriceLevel], requested_quantity: float) -> tuple[float, float]:
+    remaining = requested_quantity
+    filled = 0.0
+    notional = 0.0
+    for level in levels:
+        if remaining <= 0:
+            break
+        quantity = min(level.quantity, remaining)
+        filled += quantity
+        notional += quantity * level.price
+        remaining -= quantity
+    return filled, notional
+
+
+def _adverse_slippage_pct(
+    side: str,
+    reference_price: float,
+    average_price: float | None,
+) -> float | None:
+    if average_price is None or reference_price <= 0:
+        return None
+    if side == "SELL":
+        return max(0.0, (reference_price - average_price) / reference_price * 100)
+    return max(0.0, (average_price - reference_price) / reference_price * 100)
+
+
+def _blocked_slippage_assessment(
+    intent: RiskReducingOrderIntent,
+    side: str,
+    risk_flags: list[str],
+) -> OrderBookSlippageAssessment:
+    return OrderBookSlippageAssessment(
+        status="blocked",
+        side=side,
+        requested_quantity=intent.quantity,
+        filled_quantity=0.0,
+        reference_price=None,
+        average_price=None,
+        estimated_slippage_pct=None,
+        depth_exhausted=True,
+        risk_flags=risk_flags,
+    )
 
 
 def _validate_binance_futures_close_only(intent: RiskReducingOrderIntent) -> None:

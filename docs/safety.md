@@ -57,7 +57,10 @@ Entry timing research:
 Protective exit guard note:
 
 - Current protective exit guard work is a design foundation only.
-- It adds safe defaults and model-level validation, not exchange adapters or order submission.
+- It adds safe defaults, model-level validation, and public orderbook slippage preflight checks, not
+  exchange adapters or order submission.
+- The orderbook preflight uses public depth snapshots only and blocks dry-run review when the
+  snapshot is missing, stale, shallow, or above the configured slippage threshold.
 - Any future private-account or execution safety feature is out of scope for this public-data MVP.
 - Such a feature would need a separate safety review and must stay outside the public-data
   screener path.
