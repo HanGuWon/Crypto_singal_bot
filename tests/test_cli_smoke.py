@@ -91,6 +91,90 @@ def test_cli_exit_guard_preflight_mock_outputs_research_event(tmp_path, monkeypa
     assert "buy now" not in json.dumps(payload).lower()
 
 
+def test_cli_exit_guard_signal_mock_outputs_and_saves_public_candle_event(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    assert main(
+        [
+            "exit-guard",
+            "signal",
+            "--exchange",
+            "binance_usdm_futures",
+            "--symbol",
+            "BTCUSDT",
+            "--interval",
+            "5m",
+            "--exposure-side",
+            "long",
+            "--confirmation-intervals",
+            "15m",
+            "--mock-candles",
+            "--save-event",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dry_run"] is True
+    assert payload["private_api_used"] is False
+    assert payload["live_order_submitted"] is False
+    assert payload["exchange_order_endpoint_used"] is False
+    assert payload["candle_source"] == "mock"
+    assert payload["candle_count"] >= 60
+    assert payload["data_quality"]["status"] == "pass"
+    assert payload["signal"]["is_closed_candle_signal"] is True
+    assert payload["signal"]["state"] in {
+        "WATCHING",
+        "WARNING",
+        "EXIT_CANDIDATE",
+        "EXIT_CONFIRMED",
+        "SEVERE_EXIT_CANDIDATE",
+        "SAFETY_BLOCKED",
+    }
+    assert payload["confirmation_intervals"] == ["15m"]
+    assert payload["confirmation_signals"][0]["interval"] == "15m"
+    assert payload["alert_event"]["event_type"].startswith("PROTECTIVE_EXIT_")
+    assert payload["saved_event"] is True
+    assert "No order was placed" in payload["research_warning"]
+    assert "buy now" not in json.dumps(payload).lower()
+
+    saved = SQLiteStore(db_path).fetch_alert_event(payload["saved_alert_event_id"])
+    assert saved is not None
+    assert saved.source_run_id == payload["signal"]["signal_id"]
+
+
+def test_cli_exit_guard_signal_without_candles_safety_blocks(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "exit-guard",
+            "signal",
+            "--exchange",
+            "binance_usdm_futures",
+            "--symbol",
+            "BTCUSDT",
+            "--interval",
+            "5m",
+            "--exposure-side",
+            "short",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["candle_source"] == "database"
+    assert payload["candle_count"] == 0
+    assert payload["data_quality"]["status"] == "fail"
+    assert payload["signal"]["state"] == "SAFETY_BLOCKED"
+    assert payload["signal"]["data_quality_status"] == "fail"
+    assert payload["alert_event"]["event_type"] == "PROTECTIVE_EXIT_BLOCKED"
+    assert payload["saved_event"] is False
+
+
 def test_cli_exit_guard_blocks_unallowlisted_symbol_before_manual_approval(
     tmp_path,
     monkeypatch,

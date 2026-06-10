@@ -96,6 +96,7 @@ python -m crypto_signal_bot.cli alert-test --channel noop
 Protective exit guard dry-run preflight:
 
 ```bash
+python -m crypto_signal_bot.cli exit-guard signal --exchange binance_usdm_futures --symbol BTCUSDT --interval 5m --exposure-side long --mock-candles --save-event
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook
 python -m crypto_signal_bot.cli exit-guard preflight --exchange upbit_spot --symbol KRW-BTC --action sell_only --side ask --quantity 0.01 --mock-orderbook --save-event --notify
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_short --side BUY --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --request-approval
@@ -119,6 +120,11 @@ events show ALERT_EVENT_ID` includes the saved event and its notification delive
 `--request-approval` creates a bounded manual approval audit record with a binding hash for the
 source event, exchange, symbol, side, quantity, and position scope only when the public preflight
 passes. Approval decisions are records only; they do not unlock live execution.
+
+The `exit-guard signal` command builds a public-candle trend-break research signal before any
+orderbook preflight. It reads stored candles or deterministic mock candles, ignores open candles,
+can include optional confirmation intervals, and can save the resulting `AlertEvent` for audit. It
+does not read balances or positions and does not create approval requests.
 
 Database maintenance:
 

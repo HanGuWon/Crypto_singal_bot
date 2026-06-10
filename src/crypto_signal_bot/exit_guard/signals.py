@@ -59,6 +59,9 @@ def build_trend_break_exit_signal(
     quality: DataQualityReport | None = None,
     config: TrendBreakExitConfig | None = None,
     source_run_id: str | None = None,
+    exchange: str | None = None,
+    symbol: str | None = None,
+    interval: str | None = None,
 ) -> ProtectiveExitSignal:
     diagnostics = compute_trend_break_diagnostics(
         candles,
@@ -69,15 +72,15 @@ def build_trend_break_exit_signal(
     closed = _closed_candles(candles)
     latest = closed[-1] if closed else None
     now = latest.close_time_utc if latest is not None else datetime.now(tz=UTC)
-    exchange = latest.exchange if latest is not None else "unknown"
-    symbol = latest.symbol if latest is not None else "unknown"
-    interval = latest.interval if latest is not None else "unknown"
+    event_exchange = exchange or (latest.exchange if latest is not None else "unknown")
+    event_symbol = symbol or (latest.symbol if latest is not None else "unknown")
+    event_interval = interval or (latest.interval if latest is not None else "unknown")
     return ProtectiveExitSignal(
-        signal_id=source_run_id or f"exit-guard-{exchange}-{symbol}-{interval}-{now.isoformat()}",
+        signal_id=source_run_id or f"exit-guard-{event_exchange}-{event_symbol}-{event_interval}-{now.isoformat()}",
         created_at_utc=now,
-        exchange=exchange,
-        symbol=symbol,
-        interval=interval,
+        exchange=event_exchange,
+        symbol=event_symbol,
+        interval=event_interval,
         state=diagnostics.state,
         exit_score=diagnostics.exit_score,
         drivers=diagnostics.drivers,

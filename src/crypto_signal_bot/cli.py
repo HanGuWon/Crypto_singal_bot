@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -42,6 +42,13 @@ from crypto_signal_bot.exit_guard.models import (
     ProtectiveExitSignal,
     RiskReducingOrderIntent,
     assess_orderbook_slippage,
+)
+from crypto_signal_bot.exit_guard.signals import (
+    TrendBreakDiagnostics,
+    TrendBreakExitConfig,
+    build_trend_break_exit_signal,
+    combine_multi_timeframe_exit_signals,
+    compute_trend_break_diagnostics,
 )
 from crypto_signal_bot.features.feature_builder import FeatureSnapshot, build_feature_snapshot
 from crypto_signal_bot.features.indicators import interval_to_minutes
@@ -82,6 +89,13 @@ class ScoredResearchCandidate:
     score_explanation: dict[str, object]
     data_window_start_utc: str
     data_window_end_utc: str
+
+
+class ExitGuardPersistenceResult(TypedDict):
+    event_saved: bool
+    notification_note: str
+    notification_results: list[dict[str, object]]
+    delivery_audit_count: int
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -267,6 +281,27 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Persist a manual approval request bound to this dry-run event without executing anything.",
     )
     preflight.add_argument("--approval-ttl-minutes", type=int, default=30)
+    signal = exit_guard_sub.add_parser(
+        "signal",
+        help="Build a dry-run protective exit trend-break signal from public closed candles.",
+    )
+    signal.add_argument("--exchange", choices=["upbit_spot", "binance_usdm_futures"], required=True)
+    signal.add_argument("--symbol", required=True)
+    signal.add_argument("--interval", default="5m")
+    signal.add_argument("--exposure-side", choices=["spot_long", "long", "short"], required=True)
+    signal.add_argument("--limit", type=int, default=120)
+    signal.add_argument(
+        "--confirmation-intervals",
+        default="",
+        help="Comma-separated public candle intervals to use as optional multi-timeframe confirmation.",
+    )
+    signal.add_argument(
+        "--mock-candles",
+        action="store_true",
+        help="Seed deterministic local public-candle fixtures before computing the signal.",
+    )
+    signal.add_argument("--save-event", action="store_true")
+    signal.add_argument("--notify", action="store_true")
     events = exit_guard_sub.add_parser("events", help="Inspect saved protective exit dry-run events.")
     events_sub = events.add_subparsers(dest="exit_guard_events_command", required=True)
     events_list = events_sub.add_parser("list", help="List saved protective exit events.")
@@ -498,6 +533,92 @@ def _slippage_assessment_to_dict(assessment: OrderBookSlippageAssessment) -> dic
         "depth_exhausted": assessment.depth_exhausted,
         "risk_flags": assessment.risk_flags,
     }
+
+
+def _exit_guard_signal_to_dict(signal: ProtectiveExitSignal) -> dict[str, object]:
+    return {
+        "signal_id": signal.signal_id,
+        "created_at_utc": signal.created_at_utc.astimezone(UTC).isoformat(),
+        "exchange": signal.exchange,
+        "symbol": signal.symbol,
+        "interval": signal.interval,
+        "state": signal.state,
+        "exit_score": signal.exit_score,
+        "drivers": signal.drivers,
+        "risk_flags": signal.risk_flags,
+        "is_closed_candle_signal": signal.is_closed_candle_signal,
+        "data_quality_status": signal.data_quality_status,
+    }
+
+
+def _trend_break_diagnostics_to_dict(diagnostics: TrendBreakDiagnostics) -> dict[str, object]:
+    return {
+        "exposure_side": diagnostics.exposure_side,
+        "state": diagnostics.state,
+        "exit_score": diagnostics.exit_score,
+        "latest_close": diagnostics.latest_close,
+        "swing_level": diagnostics.swing_level,
+        "atr_value": diagnostics.atr_value,
+        "break_distance_atr": diagnostics.break_distance_atr,
+        "ema_fast": diagnostics.ema_fast,
+        "ema_slow": diagnostics.ema_slow,
+        "volume_zscore": diagnostics.volume_zscore,
+        "adverse_move_pct": diagnostics.adverse_move_pct,
+        "rebound_pct": diagnostics.rebound_pct,
+        "used_closed_candles": diagnostics.used_closed_candles,
+        "ignored_open_candles": diagnostics.ignored_open_candles,
+        "drivers": diagnostics.drivers,
+        "risk_flags": diagnostics.risk_flags,
+    }
+
+
+def _data_quality_to_dict(quality: DataQualityReport) -> dict[str, object]:
+    return {
+        "status": quality.status,
+        "warnings": quality.warnings,
+        "coverage_ratio": quality.coverage_ratio,
+        "stale_seconds": quality.stale_seconds,
+        "latest_close_time_utc": (
+            quality.latest_close_time_utc.astimezone(UTC).isoformat()
+            if quality.latest_close_time_utc is not None
+            else None
+        ),
+        "missing_candle_count": quality.missing_candle_count,
+        "max_gap_intervals": quality.max_gap_intervals,
+        "timestamp_drift_count": quality.timestamp_drift_count,
+    }
+
+
+def _parse_optional_csv(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+def _seed_exit_guard_mock_candles(
+    store: SQLiteStore,
+    *,
+    exchange: str,
+    symbol: str,
+    intervals: list[str],
+    limit: int,
+) -> None:
+    quote = _quote_for_exit_guard_mock_symbol(exchange, symbol)
+    for interval in intervals:
+        candles = [
+            candle
+            for candle in make_mock_candles(exchange, quote, interval, limit=limit)
+            if candle.symbol == symbol
+        ]
+        store.upsert_candles(candles)
+
+
+def _quote_for_exit_guard_mock_symbol(exchange: str, symbol: str) -> str:
+    if exchange == "upbit" and "-" in symbol:
+        return symbol.split("-", 1)[0]
+    if symbol.endswith("USDT"):
+        return "USDT"
+    if symbol.endswith("USDC"):
+        return "USDC"
+    return "USDT"
 
 
 def _rank(args: argparse.Namespace, settings: Settings) -> int:
@@ -853,6 +974,8 @@ def _alert_test(args: argparse.Namespace, settings: Settings) -> int:
 def _exit_guard(args: argparse.Namespace, settings: Settings) -> int:
     if args.exit_guard_command == "preflight":
         return _exit_guard_preflight(args, settings)
+    if args.exit_guard_command == "signal":
+        return _exit_guard_signal(args, settings)
     if args.exit_guard_command == "events":
         return _exit_guard_events(args, settings)
     if args.exit_guard_command == "approvals":
@@ -929,9 +1052,14 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
     event = build_protective_exit_alert_event(signal, intent=intent, slippage=slippage, now=now)
     if args.approval_ttl_minutes <= 0:
         raise ConfigError("--approval-ttl-minutes must be positive.")
-    event_saved = bool(args.save_event or args.notify or args.request_approval)
-    if event_saved:
-        store.insert_alert_event(event)
+    persistence = _persist_and_maybe_dispatch_exit_guard_event(
+        store,
+        event=event,
+        settings=settings,
+        notify=args.notify,
+        force_save=bool(args.save_event or args.request_approval),
+        now=now,
+    )
     approval_request = None
     approval_note = "not_requested"
     if args.request_approval:
@@ -946,10 +1074,182 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
             approval_note = "created"
         else:
             approval_note = "skipped because exit guard preflight is blocked"
+    event_saved = bool(persistence["event_saved"])
+    delivery_audit_count = int(persistence["delivery_audit_count"])
+    _print_json(
+        {
+            "dry_run": True,
+            "manual_approval_required": True,
+            "private_api_used": False,
+            "live_order_submitted": False,
+            "exchange_order_endpoint_used": False,
+            "orderbook_source": "mock" if args.mock_orderbook else "database",
+            "max_orderbook_age_seconds": max_orderbook_age_seconds,
+            "max_slippage_pct": max_slippage_pct,
+            "symbol_allowlist": symbol_allowlist,
+            "intent": _exit_guard_intent_to_dict(intent),
+            "orderbook_available": orderbook is not None,
+            "slippage_assessment": _slippage_assessment_to_dict(slippage),
+            "alert_event": event.to_dict(),
+            "saved_event": event_saved,
+            "saved_alert_event_id": event.alert_event_id if event_saved else None,
+            "notification_note": persistence["notification_note"],
+            "notification_results": persistence["notification_results"],
+            "delivery_audit_recorded": delivery_audit_count > 0,
+            "delivery_audit_count": delivery_audit_count,
+            "manual_approval_request": approval_request,
+            "manual_approval_note": approval_note,
+            "research_warning": (
+                "Protective exit guard dry-run research only. Not financial advice. "
+                "No new position was opened. No order was placed."
+            ),
+        }
+    )
+    return 0
+
+
+def _exit_guard_signal(args: argparse.Namespace, settings: Settings) -> int:
+    if args.limit <= 0:
+        raise ConfigError("--limit must be positive.")
+    confirmation_intervals = _parse_optional_csv(args.confirmation_intervals)
+    store_exchange = _store_exchange_for_exit_guard(args.exchange)
+    store = SQLiteStore(settings.database_path)
+    if args.mock_candles:
+        _seed_exit_guard_mock_candles(
+            store,
+            exchange=store_exchange,
+            symbol=args.symbol,
+            intervals=_unique_strings([args.interval, *confirmation_intervals]),
+            limit=max(args.limit, 120),
+        )
+
+    candles = store.fetch_candles(store_exchange, args.symbol, args.interval, limit=args.limit)
+    quality = assess_candles(candles, args.interval, max_staleness_seconds=settings.max_staleness_seconds)
+    config = TrendBreakExitConfig()
+    diagnostics = compute_trend_break_diagnostics(
+        candles,
+        exposure_side=args.exposure_side,
+        quality=quality,
+        config=config,
+    )
+    signal = build_trend_break_exit_signal(
+        candles,
+        exposure_side=args.exposure_side,
+        quality=quality,
+        config=config,
+        source_run_id=str(uuid4()),
+        exchange=args.exchange,
+        symbol=args.symbol,
+        interval=args.interval,
+    )
+    confirmation_payloads: list[dict[str, object]] = []
+    confirmation_signals: list[ProtectiveExitSignal] = []
+    for confirmation_interval in confirmation_intervals:
+        confirmation_candles = store.fetch_candles(
+            store_exchange,
+            args.symbol,
+            confirmation_interval,
+            limit=args.limit,
+        )
+        confirmation_quality = assess_candles(
+            confirmation_candles,
+            confirmation_interval,
+            max_staleness_seconds=settings.max_staleness_seconds,
+        )
+        confirmation_diagnostics = compute_trend_break_diagnostics(
+            confirmation_candles,
+            exposure_side=args.exposure_side,
+            quality=confirmation_quality,
+            config=config,
+        )
+        confirmation_signal = build_trend_break_exit_signal(
+            confirmation_candles,
+            exposure_side=args.exposure_side,
+            quality=confirmation_quality,
+            config=config,
+            source_run_id=str(uuid4()),
+            exchange=args.exchange,
+            symbol=args.symbol,
+            interval=confirmation_interval,
+        )
+        confirmation_signals.append(confirmation_signal)
+        confirmation_payloads.append(
+            {
+                "interval": confirmation_interval,
+                "candle_count": len(confirmation_candles),
+                "data_quality": _data_quality_to_dict(confirmation_quality),
+                "diagnostics": _trend_break_diagnostics_to_dict(confirmation_diagnostics),
+                "signal": _exit_guard_signal_to_dict(confirmation_signal),
+            }
+        )
+    combined_signal = (
+        combine_multi_timeframe_exit_signals(signal, confirmation_signals)
+        if confirmation_signals
+        else signal
+    )
+    now = utc_now()
+    event = build_protective_exit_alert_event(combined_signal, now=now)
+    persistence = _persist_and_maybe_dispatch_exit_guard_event(
+        store,
+        event=event,
+        settings=settings,
+        notify=args.notify,
+        force_save=args.save_event,
+        now=now,
+    )
+    event_saved = bool(persistence["event_saved"])
+    delivery_audit_count = int(persistence["delivery_audit_count"])
+    _print_json(
+        {
+            "dry_run": True,
+            "manual_approval_required": True,
+            "private_api_used": False,
+            "live_order_submitted": False,
+            "exchange_order_endpoint_used": False,
+            "candle_source": "mock" if args.mock_candles else "database",
+            "exchange": args.exchange,
+            "stored_public_exchange": store_exchange,
+            "symbol": args.symbol,
+            "interval": args.interval,
+            "exposure_side": args.exposure_side,
+            "candle_count": len(candles),
+            "confirmation_intervals": list(confirmation_intervals),
+            "data_quality": _data_quality_to_dict(quality),
+            "diagnostics": _trend_break_diagnostics_to_dict(diagnostics),
+            "signal": _exit_guard_signal_to_dict(combined_signal),
+            "confirmation_signals": confirmation_payloads,
+            "alert_event": event.to_dict(),
+            "saved_event": event_saved,
+            "saved_alert_event_id": event.alert_event_id if event_saved else None,
+            "notification_note": persistence["notification_note"],
+            "notification_results": persistence["notification_results"],
+            "delivery_audit_recorded": delivery_audit_count > 0,
+            "delivery_audit_count": delivery_audit_count,
+            "research_warning": (
+                "Protective exit guard public-candle dry-run research only. Not financial advice. "
+                "No new position was opened. No order was placed."
+            ),
+        }
+    )
+    return 0
+
+
+def _persist_and_maybe_dispatch_exit_guard_event(
+    store: SQLiteStore,
+    *,
+    event: Any,
+    settings: Settings,
+    notify: bool,
+    force_save: bool,
+    now: datetime,
+) -> ExitGuardPersistenceResult:
+    event_saved = bool(force_save or notify)
+    if event_saved:
+        store.insert_alert_event(event)
     notification_results: list[dict[str, object]] = []
     delivery_audit_count = 0
     notification_note = "not_requested"
-    if args.notify:
+    if notify:
         if settings.notifications_enabled and settings.exit_guard.discord_alerts_enabled:
             notifiers = _configured_notifiers(settings, channel="discord")
             for notifier in notifiers:
@@ -968,54 +1268,24 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
                 outbox_store=store,
             )
             delivery_pairs = dispatcher.dispatch_with_events([event])
-            for pair_event, result in delivery_pairs:
-                store.insert_notification_delivery(
-                    delivery_record(result, pair_event.alert_event_id, attempted_at=now)
-                )
-            delivery_audit_count = len(delivery_pairs)
-            notification_results = [result.to_safe_dict() for _, result in delivery_pairs]
             notification_note = "dispatch_attempted_discord_only"
         else:
             delivery_pairs = NotificationDispatcher(False).dispatch_with_events([event])
-            for pair_event, result in delivery_pairs:
-                store.insert_notification_delivery(
-                    delivery_record(result, pair_event.alert_event_id, attempted_at=now)
-                )
-            delivery_audit_count = len(delivery_pairs)
-            notification_results = [result.to_safe_dict() for _, result in delivery_pairs]
             notification_note = (
                 "notifications skipped because they are disabled or exit guard Discord alerts are disabled"
             )
-    _print_json(
-        {
-            "dry_run": True,
-            "manual_approval_required": True,
-            "private_api_used": False,
-            "live_order_submitted": False,
-            "exchange_order_endpoint_used": False,
-            "orderbook_source": "mock" if args.mock_orderbook else "database",
-            "max_orderbook_age_seconds": max_orderbook_age_seconds,
-            "max_slippage_pct": max_slippage_pct,
-            "symbol_allowlist": symbol_allowlist,
-            "intent": _exit_guard_intent_to_dict(intent),
-            "orderbook_available": orderbook is not None,
-            "slippage_assessment": _slippage_assessment_to_dict(slippage),
-            "alert_event": event.to_dict(),
-            "saved_event": event_saved,
-            "saved_alert_event_id": event.alert_event_id if event_saved else None,
-            "notification_note": notification_note,
-            "notification_results": notification_results,
-            "delivery_audit_recorded": delivery_audit_count > 0,
-            "delivery_audit_count": delivery_audit_count,
-            "manual_approval_request": approval_request,
-            "manual_approval_note": approval_note,
-            "research_warning": (
-                "Protective exit guard dry-run research only. Not financial advice. "
-                "No new position was opened. No order was placed."
-            ),
-        }
-    )
-    return 0
+        for pair_event, result in delivery_pairs:
+            store.insert_notification_delivery(
+                delivery_record(result, pair_event.alert_event_id, attempted_at=now)
+            )
+        delivery_audit_count = len(delivery_pairs)
+        notification_results = [result.to_safe_dict() for _, result in delivery_pairs]
+    return {
+        "event_saved": event_saved,
+        "notification_note": notification_note,
+        "notification_results": notification_results,
+        "delivery_audit_count": delivery_audit_count,
+    }
 
 
 def _exit_guard_symbol_allowlist_status(
