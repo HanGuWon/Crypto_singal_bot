@@ -97,6 +97,8 @@ Example files are in `scripts/systemd/`:
 - `crypto-signal-bot-outbox-drain.timer`
 - `crypto-signal-bot-db-backup.service`
 - `crypto-signal-bot-db-backup.timer`
+- `crypto-signal-bot-db-maintenance.service`
+- `crypto-signal-bot-db-maintenance.timer`
 
 Install examples:
 
@@ -117,6 +119,17 @@ you later enable Telegram or Discord research alerts, keep the drain bounded, fo
 
 The backup helper at `scripts/sqlite_backup.sh` writes compressed SQLite backups and removes old
 backup files after `BACKUP_KEEP_DAYS`.
+
+SQLite candle retention is available as an explicit maintenance command:
+
+```bash
+python -m crypto_signal_bot.cli db prune-retention --profile configs/gcp_free_tier.yaml
+python -m crypto_signal_bot.cli db prune-retention --profile configs/gcp_free_tier.yaml --execute --vacuum
+```
+
+The first command is a dry run. The second command applies the `retention:` section from the
+free-tier profile and runs `VACUUM` afterward. The example
+`crypto-signal-bot-db-maintenance.timer` runs weekly, but it is not enabled by default.
 
 The logrotate example at `scripts/logrotate/crypto_signal_bot` assumes file logs under
 `/opt/crypto_signal_bot/logs/*.log`. If you rely only on journald, logrotate is optional.

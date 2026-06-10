@@ -125,10 +125,13 @@ Database maintenance:
 ```bash
 python -m crypto_signal_bot.cli db migrate
 python -m crypto_signal_bot.cli db doctor
+python -m crypto_signal_bot.cli db prune-retention --profile configs/gcp_free_tier.yaml
+python -m crypto_signal_bot.cli db prune-retention --profile configs/gcp_free_tier.yaml --execute --vacuum
 ```
 
 The local SQLite schema uses versioned migrations and `db doctor` validates required tables,
-columns, and audit indexes.
+columns, and audit indexes. Retention pruning is dry-run by default; `--execute` is required before
+rows are deleted.
 
 Notification operations:
 

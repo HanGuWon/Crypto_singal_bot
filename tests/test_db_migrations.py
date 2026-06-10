@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 
 from crypto_signal_bot.cli import main
+from crypto_signal_bot.data.models import Candle
 from crypto_signal_bot.data.store import MIGRATIONS, Migration, SQLiteStore
 
 
@@ -107,6 +109,34 @@ def test_entry_timing_snapshot_insert_is_idempotent(tmp_path) -> None:
     assert rows[0]["entry_timing_score"] == 88.0
 
 
+def test_candle_retention_prune_dry_run_and_execute(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "retention.sqlite")
+    now = datetime(2026, 1, 10, tzinfo=UTC)
+    store.upsert_candles(
+        [
+            _retention_candle("old", "5m", now - timedelta(days=50)),
+            _retention_candle("fresh", "5m", now - timedelta(days=10)),
+            _retention_candle("old-15m", "15m", now - timedelta(days=100)),
+        ]
+    )
+
+    dry_run = store.prune_candles_by_retention({"5m": 45, "15m": 90}, now_utc=now)
+
+    assert sum(int(row["matched_candles"]) for row in dry_run) == 2
+    assert sum(int(row["deleted_candles"]) for row in dry_run) == 0
+    assert len(store.fetch_candles("binance", "BTCUSDT", "5m")) == 2
+
+    executed = store.prune_candles_by_retention(
+        {"5m": 45, "15m": 90},
+        now_utc=now,
+        dry_run=False,
+    )
+
+    assert sum(int(row["deleted_candles"]) for row in executed) == 2
+    assert [candle.symbol for candle in store.fetch_candles("binance", "BTCUSDT", "5m")] == ["BTCUSDT"]
+    assert store.fetch_candles("binance", "ETHUSDT", "15m") == []
+
+
 def test_failed_migration_rolls_back(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "rollback.sqlite")
     bad_migration = Migration(
@@ -137,10 +167,63 @@ def test_db_migrate_and_doctor_cli(tmp_path, monkeypatch) -> None:  # type: igno
     assert main(["db", "doctor"]) == 0
 
 
+def test_db_prune_retention_cli_dry_run_and_execute(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "cli-retention.sqlite"
+    profile_path = tmp_path / "gcp_free_tier.yaml"
+    profile_path.write_text("retention:\n  5m_days: 45\n", encoding="utf-8")
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    store = SQLiteStore(db_path)
+    old_time = datetime.now(tz=UTC) - timedelta(days=50)
+    fresh_time = datetime.now(tz=UTC) - timedelta(days=5)
+    store.upsert_candles([
+        _retention_candle("old", "5m", old_time),
+        _retention_candle("fresh", "5m", fresh_time),
+    ])
+
+    assert main(["db", "prune-retention", "--profile", str(profile_path)]) == 0
+    dry_payload = capsys.readouterr().out
+    assert '"dry_run": true' in dry_payload
+    assert '"matched_candles": 1' in dry_payload
+    assert len(store.fetch_candles("binance", "BTCUSDT", "5m")) == 2
+
+    assert main(["db", "prune-retention", "--profile", str(profile_path), "--execute"]) == 0
+    executed_payload = capsys.readouterr().out
+    assert '"dry_run": false' in executed_payload
+    assert '"deleted_candles": 1' in executed_payload
+    assert len(store.fetch_candles("binance", "BTCUSDT", "5m")) == 1
+
+
+def test_db_prune_retention_rejects_invalid_policy(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "cli-retention.sqlite"))
+
+    assert main(["db", "prune-retention", "--policy", "5m=-1"]) == 2
+
+    assert "Retention days must be positive integers" in capsys.readouterr().err
+
+
 def test_db_doctor_reports_invalid_database(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "missing.sqlite"))
 
     assert main(["db", "doctor"]) == 1
+
+
+def _retention_candle(symbol_hint: str, interval: str, open_time: datetime) -> Candle:
+    symbol = "ETHUSDT" if symbol_hint.endswith("15m") else "BTCUSDT"
+    return Candle(
+        exchange="binance",
+        symbol=symbol,
+        interval=interval,
+        open_time_utc=open_time,
+        close_time_utc=open_time + timedelta(minutes=5) - timedelta(milliseconds=1),
+        open=100,
+        high=101,
+        low=99,
+        close=100,
+        base_volume=1,
+        quote_volume=100,
+        trade_count=1,
+        is_closed=True,
+    )
 
 
 def _create_pre_outbox_schema(path) -> None:  # type: ignore[no-untyped-def]

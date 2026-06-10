@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -43,6 +44,7 @@ from crypto_signal_bot.exit_guard.models import (
     assess_orderbook_slippage,
 )
 from crypto_signal_bot.features.feature_builder import FeatureSnapshot, build_feature_snapshot
+from crypto_signal_bot.features.indicators import interval_to_minutes
 from crypto_signal_bot.logging_config import configure_logging
 from crypto_signal_bot.notifications.base import Notifier
 from crypto_signal_bot.notifications.destinations import destination_hash, notifier_destination
@@ -161,6 +163,11 @@ def _build_parser() -> argparse.ArgumentParser:
     db_sub = db.add_subparsers(dest="db_command", required=True)
     db_sub.add_parser("migrate", help="Apply versioned SQLite schema migrations.")
     db_sub.add_parser("doctor", help="Validate required SQLite tables, columns, and indexes.")
+    prune = db_sub.add_parser("prune-retention", help="Prune old SQLite candles by interval retention policy.")
+    prune.add_argument("--profile", default="configs/gcp_free_tier.yaml")
+    prune.add_argument("--policy", default=None, help="Comma-separated policy, for example 1m=3,3m=7,5m=45.")
+    prune.add_argument("--execute", action="store_true", help="Actually delete rows. Default is dry-run.")
+    prune.add_argument("--vacuum", action="store_true", help="Run SQLite VACUUM after an executed prune.")
 
     notifications = sub.add_parser("notifications", help="Inspect notification state safely.")
     notification_sub = notifications.add_subparsers(dest="notifications_command", required=True)
@@ -1318,7 +1325,97 @@ def _db(args: argparse.Namespace, settings: Settings) -> int:
         status = store.schema_status()
         print(json.dumps(status, indent=2))
         return 0 if bool(status["valid"]) else 1
+    if args.db_command == "prune-retention":
+        policy = _retention_policy_from_args(args)
+        dry_run = not bool(args.execute)
+        results = store.prune_candles_by_retention(policy, dry_run=dry_run)
+        vacuumed = False
+        if args.vacuum and dry_run:
+            raise ConfigError("--vacuum requires --execute.")
+        if args.vacuum:
+            store.vacuum()
+            vacuumed = True
+        _print_json(
+            {
+                "database_path": str(settings.database_path),
+                "dry_run": dry_run,
+                "retention_policy_days": policy,
+                "results": results,
+                "deleted_candles": _retention_deleted_total(results),
+                "vacuumed": vacuumed,
+                "research_warning": "Database retention maintenance only. No order was placed.",
+            }
+        )
+        return 0
     raise ConfigError(f"Unknown db command: {args.db_command}")
+
+
+def _retention_policy_from_args(args: argparse.Namespace) -> dict[str, int]:
+    if args.policy:
+        return _parse_retention_policy(args.policy)
+    return _load_retention_policy_from_profile(Path(str(args.profile)))
+
+
+def _retention_deleted_total(results: list[dict[str, object]]) -> int:
+    total = 0
+    for result in results:
+        value = result.get("deleted_candles", 0)
+        if isinstance(value, int):
+            total += value
+    return total
+
+
+def _parse_retention_policy(raw_policy: str) -> dict[str, int]:
+    values: dict[str, int] = {}
+    for item in raw_policy.split(","):
+        entry = item.strip()
+        if not entry:
+            continue
+        if "=" not in entry:
+            raise ConfigError("Retention policy entries must use interval=days format.")
+        interval, raw_days = [part.strip() for part in entry.split("=", 1)]
+        values[interval] = _parse_retention_days(interval, raw_days)
+    if not values:
+        raise ConfigError("Retention policy must include at least one interval=days entry.")
+    return values
+
+
+def _load_retention_policy_from_profile(path: Path) -> dict[str, int]:
+    if not path.exists():
+        raise ConfigError(f"Retention profile not found: {path}")
+    values: dict[str, int] = {}
+    in_retention = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line.startswith(" ") and stripped.endswith(":"):
+            in_retention = stripped == "retention:"
+            continue
+        if not in_retention:
+            continue
+        if ":" not in stripped:
+            continue
+        key, raw_days = [part.strip() for part in stripped.split(":", 1)]
+        interval = key.removesuffix("_days")
+        values[interval] = _parse_retention_days(interval, raw_days)
+    if not values:
+        raise ConfigError(f"No retention policy found in profile: {path}")
+    return values
+
+
+def _parse_retention_days(interval: str, raw_days: str) -> int:
+    try:
+        interval_to_minutes(interval)
+    except ValueError as exc:
+        raise ConfigError(f"Unsupported retention interval: {interval}") from exc
+    try:
+        days = int(raw_days)
+    except ValueError as exc:
+        raise ConfigError("Retention days must be positive integers.") from exc
+    if days <= 0:
+        raise ConfigError("Retention days must be positive integers.")
+    return days
 
 
 def _notifications(args: argparse.Namespace, settings: Settings) -> int:

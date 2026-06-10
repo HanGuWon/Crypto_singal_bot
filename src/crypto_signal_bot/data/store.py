@@ -4,7 +4,7 @@ import json
 import sqlite3
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -601,6 +601,59 @@ class SQLiteStore:
                 rows,
             )
         return len(rows)
+
+    def prune_candles_by_retention(
+        self,
+        retention_days_by_interval: dict[str, int],
+        *,
+        now_utc: datetime | None = None,
+        dry_run: bool = True,
+    ) -> list[dict[str, object]]:
+        self.init_schema()
+        now = (now_utc or datetime.now(tz=UTC)).astimezone(UTC)
+        results: list[dict[str, object]] = []
+        with self.connect() as conn:
+            for interval, retention_days in sorted(retention_days_by_interval.items()):
+                if retention_days <= 0:
+                    raise ValueError("Retention days must be positive.")
+                cutoff = now - timedelta(days=retention_days)
+                cutoff_utc = cutoff.isoformat()
+                row = conn.execute(
+                    """
+                    SELECT COUNT(*) AS count
+                    FROM candles
+                    WHERE interval=?
+                      AND close_time_utc < ?
+                    """,
+                    (interval, cutoff_utc),
+                ).fetchone()
+                matched = int(row["count"])
+                deleted = 0
+                if not dry_run and matched:
+                    cursor = conn.execute(
+                        """
+                        DELETE FROM candles
+                        WHERE interval=?
+                          AND close_time_utc < ?
+                        """,
+                        (interval, cutoff_utc),
+                    )
+                    deleted = int(cursor.rowcount)
+                results.append(
+                    {
+                        "interval": interval,
+                        "retention_days": retention_days,
+                        "cutoff_utc": cutoff_utc,
+                        "matched_candles": matched,
+                        "deleted_candles": deleted,
+                    }
+                )
+        return results
+
+    def vacuum(self) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute("VACUUM")
 
     def upsert_tickers(self, tickers: Iterable[Ticker]) -> int:
         rows = [
