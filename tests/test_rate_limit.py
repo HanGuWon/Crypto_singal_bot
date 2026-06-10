@@ -54,6 +54,62 @@ def test_binance_depth_weight_depends_on_limit() -> None:
     assert binance_depth_request_weight(5000) == 250
 
 
+def test_binance_exchange_info_updates_weight_limit() -> None:
+    http_client = FakeHttpClient([
+        FakeResponse(
+            200,
+            payload={
+                "rateLimits": [
+                    {
+                        "rateLimitType": "REQUEST_WEIGHT",
+                        "interval": "MINUTE",
+                        "intervalNum": 1,
+                        "limit": 6000,
+                    }
+                ],
+                "symbols": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "baseAsset": "BTC",
+                        "quoteAsset": "USDT",
+                        "status": "TRADING",
+                        "isSpotTradingAllowed": True,
+                    }
+                ],
+            },
+        )
+    ])
+    client = BinancePublicClient(http_client=http_client)
+
+    markets = client.get_markets("USDT")
+
+    assert markets[0].raw_symbol == "BTCUSDT"
+    assert client.limiter.max_weight_per_minute == 6000
+
+
+def test_binance_exchange_info_ignores_invalid_rate_limit_rows() -> None:
+    http_client = FakeHttpClient([
+        FakeResponse(
+            200,
+            payload={
+                "rateLimits": [
+                    {
+                        "rateLimitType": "REQUEST_WEIGHT",
+                        "interval": "MINUTE",
+                        "intervalNum": "bad",
+                        "limit": 6000,
+                    }
+                ],
+                "symbols": [],
+            },
+        )
+    ])
+    client = BinancePublicClient(http_client=http_client)
+
+    assert client.get_markets("USDT") == []
+    assert client.limiter.max_weight_per_minute == 1200
+
+
 def test_retry_after_parser_accepts_seconds_and_http_date() -> None:
     now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
 

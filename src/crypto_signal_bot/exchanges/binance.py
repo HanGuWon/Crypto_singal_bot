@@ -46,6 +46,7 @@ class BinancePublicClient:
 
     def get_markets(self, quote: str = "USDT") -> list[MarketSymbol]:
         payload = self._get("/api/v3/exchangeInfo", params={}, weight=20)
+        self._update_rate_limits_from_exchange_info(payload)
         symbols = [parse_binance_symbol(item) for item in payload.get("symbols", [])]
         return [symbol for symbol in symbols if symbol.quote_asset == quote]
 
@@ -102,6 +103,27 @@ class BinancePublicClient:
         if last_error:
             raise last_error
         raise ExchangeClientError("Binance request failed.")
+
+    def _update_rate_limits_from_exchange_info(self, payload: Any) -> None:
+        if not isinstance(payload, dict):
+            return
+        for item in payload.get("rateLimits", []):
+            if not isinstance(item, dict):
+                continue
+            try:
+                interval_num = int(item.get("intervalNum") or 0)
+            except (TypeError, ValueError):
+                continue
+            if (
+                item.get("rateLimitType") == "REQUEST_WEIGHT"
+                and item.get("interval") == "MINUTE"
+                and interval_num == 1
+            ):
+                try:
+                    self.limiter.max_weight_per_minute = int(item["limit"])
+                except (KeyError, TypeError, ValueError):
+                    return
+                return
 
 
 def parse_binance_symbol(item: dict[str, Any]) -> MarketSymbol:

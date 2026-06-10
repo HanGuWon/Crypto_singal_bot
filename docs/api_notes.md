@@ -34,4 +34,5 @@ Collection policy:
 
 Binance request weights are tracked from `X-MBX-USED-WEIGHT-1M`. HTTP 429 is retried with bounded
 backoff and `Retry-After` when present as seconds or an HTTP-date. HTTP 418 fails the client
-request.
+request. The public `exchangeInfo.rateLimits` `REQUEST_WEIGHT` per-minute limit updates the local
+soft weight limiter when available.
