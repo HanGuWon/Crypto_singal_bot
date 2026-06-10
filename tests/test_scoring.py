@@ -77,6 +77,43 @@ def test_scoring_flags_timestamp_drift_as_critical_risk() -> None:
     assert candidate.confidence == "low"
 
 
+def test_scoring_flags_missing_candles_as_critical_risk() -> None:
+    candles = [
+        candle
+        for index, candle in enumerate(
+            [c for c in make_mock_candles("binance", "USDT", "5m", limit=100) if c.symbol == "BTCUSDT"]
+        )
+        if index % 10 != 0
+    ]
+    quality = assess_candles(candles, "5m", now=datetime.now(tz=UTC) + timedelta(minutes=1))
+    snapshot = build_feature_snapshot(candles, quality=quality)
+
+    candidate = ScoringEngine().score(snapshot)
+
+    assert quality.status == "warn"
+    assert "missing_candles" in quality.warnings
+    assert "missing_candles" in candidate.risk_flags
+    assert candidate.confidence == "low"
+
+
+def test_scoring_does_not_treat_upbit_no_trade_gap_as_missing_candles() -> None:
+    candles = [
+        candle
+        for index, candle in enumerate(
+            [c for c in make_mock_candles("upbit", "KRW", "5m", limit=100) if c.symbol == "KRW-BTC"]
+        )
+        if index not in {15, 30, 45, 60, 75, 90}
+    ]
+    quality = assess_candles(candles, "5m", now=datetime.now(tz=UTC) + timedelta(minutes=1))
+    snapshot = build_feature_snapshot(candles, quality=quality)
+
+    candidate = ScoringEngine().score(snapshot)
+
+    assert quality.status == "warn"
+    assert quality.warnings == ["upbit_possible_no_trade_gap"]
+    assert "missing_candles" not in candidate.risk_flags
+
+
 def test_scoring_uses_configured_liquidity_threshold() -> None:
     candles = [c for c in make_mock_candles("binance", "USDT", "5m", limit=100) if c.symbol == "BTCUSDT"]
     quality = assess_candles(candles, "5m", now=datetime.now(tz=UTC) + timedelta(minutes=1))

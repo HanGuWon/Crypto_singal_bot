@@ -203,6 +203,8 @@ def _penalties(values: dict[str, float | None], risk_flags: list[str]) -> dict[s
         penalties["stale_orderbook"] = 15
     if "orderbook_timestamp_drift" in risk_flags:
         penalties["orderbook_timestamp_drift"] = 20
+    if "missing_candles" in risk_flags:
+        penalties["missing_candles"] = 20
     if "low_liquidity" in risk_flags:
         penalties["low_liquidity"] = 25
     if "upper_wick_reversal_risk" in risk_flags:

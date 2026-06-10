@@ -25,7 +25,7 @@ AlertPolicy handles:
 - breakout watch
 - risk warning
 - invalidation
-- stale and failed-quality suppression
+- stale, missing-candle, and failed-quality suppression
 - closed-candle only suppression
 - single-extreme-component suppression
 - low-liquidity, wide-spread, missing-orderbook, and stale-orderbook suppression
