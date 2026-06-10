@@ -63,6 +63,23 @@ def test_discord_payload_blocks_mentions_by_default() -> None:
     assert all(word not in combined for word in FORBIDDEN_ALERT_WORDS)
 
 
+def test_discord_payload_clips_long_fields_and_preserves_warning() -> None:
+    event = make_alert(
+        drivers=["driver_" + ("x" * 2000) for _ in range(5)],
+        risk_flags=["risk_" + ("y" * 2000) for _ in range(5)],
+        invalidation_condition="research invalidates when " + ("z" * 2000),
+    )
+
+    payload = format_discord_payload(event)
+
+    assert payload["content"] == RESEARCH_WARNING
+    fields = payload["embeds"][0]["fields"]
+    assert all(0 < len(str(field["value"])) <= 1024 for field in fields)
+    assert next(field for field in fields if field["name"] == "Drivers")["value"].endswith("...")
+    assert next(field for field in fields if field["name"] == "Risk flags")["value"].endswith("...")
+    assert next(field for field in fields if field["name"] == "Invalidation")["value"].endswith("...")
+
+
 def test_discord_payload_surfaces_exit_guard_manual_approval_id() -> None:
     event = make_alert(
         event_type="PROTECTIVE_EXIT_WATCH",

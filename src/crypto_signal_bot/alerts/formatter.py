@@ -10,6 +10,9 @@ EXIT_GUARD_WARNING = (
     "Protective exit guard alert. Risk-reduction only. Not financial advice. "
     "No new position was opened. No order was placed."
 )
+DISCORD_FIELD_VALUE_LIMIT = 1024
+DISCORD_COMPACT_FIELD_VALUE_LIMIT = 512
+DISCORD_INVALIDATION_FIELD_VALUE_LIMIT = 700
 FORBIDDEN_ALERT_WORDS = [
     "buy now",
     "guaranteed",
@@ -60,23 +63,35 @@ def format_discord_payload(
 ) -> dict[str, Any]:
     manual_approval_request_id = _manual_approval_request_id(event)
     fields: list[dict[str, object]] = [
-        {"name": "Score", "value": f"{event.score:.1f} ({event.confidence})", "inline": True},
-        {"name": "Rank", "value": f"#{event.rank}" if event.rank is not None else "n/a", "inline": True},
-        {
-            "name": "Price",
-            "value": f"{event.current_price:.8g}" if event.current_price is not None else "n/a",
-            "inline": True,
-        },
-        {"name": "Drivers", "value": ", ".join(event.drivers[:5]) or "mixed_evidence"},
-        {"name": "Risk flags", "value": ", ".join(event.risk_flags[:5]) or "none"},
-        {"name": "Invalidation", "value": event.invalidation_condition},
-        {"name": "Data timestamp UTC", "value": event.data_timestamp_utc},
-        {"name": "Data freshness", "value": _format_freshness(event.data_freshness_seconds), "inline": True},
-        {"name": "Alert event id", "value": event.alert_event_id},
-        {"name": "Source run id", "value": event.source_run_id},
+        _discord_field("Score", f"{event.score:.1f} ({event.confidence})", inline=True),
+        _discord_field("Rank", f"#{event.rank}" if event.rank is not None else "n/a", inline=True),
+        _discord_field(
+            "Price",
+            f"{event.current_price:.8g}" if event.current_price is not None else "n/a",
+            inline=True,
+        ),
+        _discord_field(
+            "Drivers",
+            ", ".join(event.drivers[:5]) or "mixed_evidence",
+            max_value_length=DISCORD_COMPACT_FIELD_VALUE_LIMIT,
+        ),
+        _discord_field(
+            "Risk flags",
+            ", ".join(event.risk_flags[:5]) or "none",
+            max_value_length=DISCORD_COMPACT_FIELD_VALUE_LIMIT,
+        ),
+        _discord_field(
+            "Invalidation",
+            event.invalidation_condition,
+            max_value_length=DISCORD_INVALIDATION_FIELD_VALUE_LIMIT,
+        ),
+        _discord_field("Data timestamp UTC", event.data_timestamp_utc),
+        _discord_field("Data freshness", _format_freshness(event.data_freshness_seconds), inline=True),
+        _discord_field("Alert event id", event.alert_event_id),
+        _discord_field("Source run id", event.source_run_id),
     ]
     if manual_approval_request_id is not None:
-        fields.append({"name": "Manual approval request id", "value": manual_approval_request_id})
+        fields.append(_discord_field("Manual approval request id", manual_approval_request_id))
     warning = _warning_text(event)
     description = warning
     validate_safe_message(description + " " + " ".join(str(field["value"]) for field in fields))
@@ -169,6 +184,17 @@ def _clip_text(value: str, max_length: int | None) -> str:
     if max_length <= 3:
         return value[:max_length]
     return value[: max_length - 3].rstrip() + "..."
+
+
+def _discord_field(
+    name: str,
+    value: object,
+    *,
+    inline: bool = False,
+    max_value_length: int = DISCORD_FIELD_VALUE_LIMIT,
+) -> dict[str, object]:
+    text = _clip_text(str(value), min(max_value_length, DISCORD_FIELD_VALUE_LIMIT))
+    return {"name": name, "value": text or "n/a", "inline": inline}
 
 
 def _format_freshness(seconds: float | None) -> str:

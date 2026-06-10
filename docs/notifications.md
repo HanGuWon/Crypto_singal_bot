@@ -75,5 +75,7 @@ Discord:
 
 - Uses a webhook payload with embeds.
 - Includes `allowed_mentions: {"parse": []}` by default.
+- Clips long embed field values before dispatch while preserving the research-only warning in
+  top-level content and embed description.
 - Handles HTTP 429 `Retry-After` or JSON `retry_after`.
 - Does not retry 401/403/404 indefinitely.
