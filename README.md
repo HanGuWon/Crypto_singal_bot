@@ -80,6 +80,9 @@ financial advice, and no order is placed. Diagnostic comparisons include BTC/ETH
 context, universe context, and deterministic random-symbol and liquidity-ranked baselines using the
 same point-in-time windows. Walk-forward diagnostics use expanding prior windows before later
 evaluation windows.
+Universe diagnostics list requested symbols, evaluable symbols, empty candle symbols, and
+delisted-or-missing asset candidates where the local candle inputs make that detectable. They are
+survivorship-bias audit aids, not a complete delisting database.
 Stress and calibration sections summarize high-volatility, thin-liquidity, benchmark-drawdown,
 API-outage-flagged, and score-bucket windows when the required diagnostic inputs are available.
 `--from` and `--to` are applied as UTC candle-open bounds; date-only `--to` includes that full UTC

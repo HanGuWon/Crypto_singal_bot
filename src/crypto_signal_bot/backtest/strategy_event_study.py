@@ -65,6 +65,7 @@ def strategy_event_study(
             for variant in STRATEGY_VARIANTS
         },
         "variant_summaries": summaries,
+        "universe_diagnostics": _strategy_universe_diagnostics(candles_by_symbol, signal_records, cfg),
         "turnover_diagnostics": turnover_exposure["turnover_diagnostics"],
         "exposure_diagnostics": turnover_exposure["exposure_diagnostics"],
         "cost_sensitivity": _cost_sensitivity(candles_by_symbol, signal_records, cfg),
@@ -475,6 +476,41 @@ def _strategy_overlap_counts(records: list[dict[str, Any]], holding_bars: int) -
         )
         for index in range(min_entry, max_exit + 1)
     ]
+
+
+def _strategy_universe_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_records: dict[str, list[dict[str, Any]]],
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    input_symbols = sorted(candles_by_symbol)
+    symbols_with_sufficient_history = [
+        symbol
+        for symbol, candles in sorted(candles_by_symbol.items())
+        if len(candles) > config.min_history_bars + max(config.horizons) + 1
+    ]
+    symbols_with_signals = sorted({
+        str(record["symbol"])
+        for records in signal_records.values()
+        for record in records
+    })
+    empty_candle_symbols = [symbol for symbol, candles in sorted(candles_by_symbol.items()) if not candles]
+    return {
+        "input_symbols": input_symbols,
+        "symbols_with_sufficient_history": symbols_with_sufficient_history,
+        "symbols_with_strategy_events": symbols_with_signals,
+        "symbols_without_strategy_events": [
+            symbol for symbol in input_symbols if symbol not in symbols_with_signals
+        ],
+        "empty_candle_symbols": empty_candle_symbols,
+        "insufficient_history_symbols": [
+            symbol for symbol in input_symbols if symbol not in symbols_with_sufficient_history
+        ],
+        "delisted_or_missing_asset_candidates": empty_candle_symbols,
+        "external_missing_assets_not_detectable_without_manifest": True,
+        "survivorship_bias_audit_only": True,
+        "not_complete_delisting_database": True,
+    }
 
 
 def _baseline_horizon_summaries(

@@ -101,6 +101,26 @@ def test_benchmark_set_diagnostics_include_btc_eth_and_missing_symbols() -> None
     assert benchmark_set["benchmark_return_by_symbol"]["ETHUSDT"]["trades"] == 6.0
 
 
+def test_universe_diagnostics_track_missing_and_empty_signal_assets() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {
+        **{symbol: [50] for symbol in candles_by_symbol},
+        "MISSINGUSDT": [50],
+        "EMPTYUSDT": [50],
+    }
+    candles_by_symbol["EMPTYUSDT"] = []
+
+    metrics = diagnostic_event_study(candles_by_symbol, signal_indices, benchmark_symbol="BTCUSDT")
+
+    universe = metrics["universe_diagnostics"]
+    assert universe["missing_signal_symbols"] == ["MISSINGUSDT"]
+    assert universe["empty_candle_symbols"] == ["EMPTYUSDT"]
+    assert universe["delisted_or_missing_asset_candidates"] == ["MISSINGUSDT", "EMPTYUSDT"]
+    assert universe["missing_or_empty_symbol_count"] == 2
+    assert universe["survivorship_bias_audit_only"] is True
+    assert universe["not_complete_delisting_database"] is True
+
+
 def test_diagnostic_baselines_use_same_point_in_time_windows() -> None:
     candles_by_symbol = _mock_universe(limit=100)
     signal_indices = {symbol: [50, 70] for symbol in candles_by_symbol}

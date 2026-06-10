@@ -27,12 +27,34 @@ def test_strategy_event_study_has_diagnostic_flags_and_horizons() -> None:
     assert result["signal_counts"]["confirmed_entry_timing"] >= 1
     assert result["variant_summaries"]["confirmed_entry_timing"]["1"]["trades"] >= 1
     assert result["cost_model"]["applied_to_variant_summaries"] is True
+    universe = result["universe_diagnostics"]
+    assert "BTCUSDT" in universe["input_symbols"]
+    assert "BTCUSDT" in universe["symbols_with_sufficient_history"]
+    assert universe["survivorship_bias_audit_only"] is True
     turnover = result["turnover_diagnostics"]
     exposure = result["exposure_diagnostics"]
     assert turnover["variant_event_counts"]["confirmed_entry_timing"] >= 1
     assert turnover["not_order_turnover"] is True
     assert exposure["event_overlap_only"] is True
     assert exposure["not_account_exposure"] is True
+
+
+def test_strategy_universe_diagnostics_mark_empty_and_insufficient_history_symbols() -> None:
+    universe = _strategy_universe()
+    universe["EMPTYUSDT"] = []
+    universe["SHORTUSDT"] = _strategy_candles("SHORTUSDT")[:10]
+
+    result = strategy_event_study(
+        universe,
+        benchmark_symbol="BTCUSDT",
+        config=StrategyEventStudyConfig(horizons=(1,), min_history_bars=20),
+    )
+
+    diagnostics = result["universe_diagnostics"]
+    assert diagnostics["empty_candle_symbols"] == ["EMPTYUSDT"]
+    assert "SHORTUSDT" in diagnostics["insufficient_history_symbols"]
+    assert diagnostics["delisted_or_missing_asset_candidates"] == ["EMPTYUSDT"]
+    assert diagnostics["external_missing_assets_not_detectable_without_manifest"] is True
 
 
 def test_strategy_event_study_reports_cost_sensitivity() -> None:

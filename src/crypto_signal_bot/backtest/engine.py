@@ -68,6 +68,7 @@ def diagnostic_event_study(
             "windows_aligned_point_in_time": True,
         },
         "baseline_diagnostics": _baseline_diagnostics(candles_by_symbol, records),
+        "universe_diagnostics": _universe_diagnostics(candles_by_symbol, signal_indices_by_symbol),
         "benchmark_set_diagnostics": _benchmark_set_diagnostics(
             candles_by_symbol,
             records,
@@ -234,6 +235,37 @@ def _baseline_diagnostics(
             "Baselines are deterministic event-study diagnostics using the same signal windows. "
             "They are not portfolio execution models."
         ),
+    }
+
+
+def _universe_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_indices_by_symbol: dict[str, list[int]],
+) -> dict[str, object]:
+    requested_symbols = sorted(signal_indices_by_symbol)
+    available_symbols = sorted(candles_by_symbol)
+    missing_symbols = [symbol for symbol in requested_symbols if symbol not in candles_by_symbol]
+    empty_candle_symbols = [
+        symbol
+        for symbol in requested_symbols
+        if symbol in candles_by_symbol and not candles_by_symbol[symbol]
+    ]
+    evaluable_symbols = [
+        symbol
+        for symbol in requested_symbols
+        if symbol in candles_by_symbol and candles_by_symbol[symbol]
+    ]
+    return {
+        "requested_signal_symbols": requested_symbols,
+        "available_data_symbols": available_symbols,
+        "evaluable_signal_symbols": evaluable_symbols,
+        "missing_signal_symbols": missing_symbols,
+        "empty_candle_symbols": empty_candle_symbols,
+        "extra_data_symbols": [symbol for symbol in available_symbols if symbol not in signal_indices_by_symbol],
+        "delisted_or_missing_asset_candidates": [*missing_symbols, *empty_candle_symbols],
+        "missing_or_empty_symbol_count": len(missing_symbols) + len(empty_candle_symbols),
+        "survivorship_bias_audit_only": True,
+        "not_complete_delisting_database": True,
     }
 
 
