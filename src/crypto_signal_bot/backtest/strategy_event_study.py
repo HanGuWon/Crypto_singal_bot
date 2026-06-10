@@ -45,6 +45,7 @@ def strategy_event_study(
     candles_by_symbol: dict[str, list[Candle]],
     *,
     benchmark_symbol: str | None = None,
+    benchmark_symbols: tuple[str, ...] | None = None,
     config: StrategyEventStudyConfig | None = None,
 ) -> dict[str, object]:
     cfg = config or StrategyEventStudyConfig()
@@ -68,6 +69,12 @@ def strategy_event_study(
             candles_by_symbol,
             signal_records,
             benchmark_symbol=benchmark_symbol,
+            config=cfg,
+        ),
+        "benchmark_set_diagnostics": _benchmark_set_diagnostics(
+            candles_by_symbol,
+            signal_records,
+            benchmark_symbols=_benchmark_symbol_set(benchmark_symbol, benchmark_symbols),
             config=cfg,
         ),
         "baseline_diagnostics": _strategy_baseline_diagnostics(
@@ -314,6 +321,59 @@ def _benchmark_diagnostics(
             str(horizon): summarize_returns(_universe_median_returns(candles_by_symbol, records, horizon))
             for horizon in config.horizons
         },
+    }
+
+
+def _benchmark_symbol_set(
+    benchmark_symbol: str | None,
+    benchmark_symbols: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    if benchmark_symbol:
+        values.append(benchmark_symbol)
+    if benchmark_symbols is not None:
+        values.extend(benchmark_symbols)
+    return tuple(_unique_strings(values))
+
+
+def _benchmark_set_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_records: dict[str, list[dict[str, Any]]],
+    *,
+    benchmark_symbols: tuple[str, ...],
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    records = signal_records["confirmed_entry_timing"] or signal_records["excluding_falling_knife"]
+    available_symbols = [symbol for symbol in benchmark_symbols if symbol in candles_by_symbol]
+    missing_symbols = [symbol for symbol in benchmark_symbols if symbol not in candles_by_symbol]
+    return {
+        "windows_aligned_point_in_time": True,
+        "requested_symbols": list(benchmark_symbols),
+        "available_symbols": available_symbols,
+        "missing_symbols": missing_symbols,
+        "benchmark_return_by_symbol": {
+            symbol: {
+                str(horizon): summarize_returns([
+                    ret
+                    for record in records
+                    if (
+                        ret := _symbol_forward_return(
+                            candles_by_symbol[symbol],
+                            int(record["signal_index"]),
+                            horizon,
+                            0.0,
+                        )
+                    )
+                    is not None
+                ])
+                for horizon in config.horizons
+            }
+            for symbol in available_symbols
+        },
+        "benchmark_notes": (
+            "Benchmark set diagnostics compare the same event windows against available benchmark symbols. "
+            "They are not execution models."
+        ),
     }
 
 

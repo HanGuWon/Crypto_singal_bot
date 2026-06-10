@@ -753,6 +753,7 @@ def _strategy_event_study(args: argparse.Namespace, settings: Settings) -> int:
     metrics = strategy_event_study(
         candles_by_symbol,
         benchmark_symbol=benchmark_symbol,
+        benchmark_symbols=_benchmark_symbols_for_quote(args.exchange, quote),
         config=StrategyEventStudyConfig(
             min_history_bars=min_history_bars,
             horizons=horizons,
@@ -766,6 +767,12 @@ def _strategy_event_study(args: argparse.Namespace, settings: Settings) -> int:
     else:
         _print_strategy_event_study_table(metrics)
     return 0
+
+
+def _benchmark_symbols_for_quote(exchange: str, quote: str) -> tuple[str, str]:
+    if exchange == "upbit":
+        return (f"{quote}-BTC", f"{quote}-ETH")
+    return (f"BTC{quote}", f"ETH{quote}")
 
 
 def _parse_positive_int_csv(value: str, *, field_name: str) -> tuple[int, ...]:

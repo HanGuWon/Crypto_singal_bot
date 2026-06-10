@@ -81,14 +81,22 @@ def test_strategy_benchmark_windows_are_point_in_time() -> None:
     result = strategy_event_study(
         _strategy_universe(),
         benchmark_symbol="BTCUSDT",
+        benchmark_symbols=("BTCUSDT", "ETHUSDT", "MISSINGUSDT"),
         config=StrategyEventStudyConfig(horizons=(1, 3), min_history_bars=20),
     )
 
     diagnostics = result["benchmark_diagnostics"]
+    benchmark_set = result["benchmark_set_diagnostics"]
     assert diagnostics["benchmark_symbol"] == "BTCUSDT"
     assert diagnostics["windows_aligned_point_in_time"] is True
     assert "1" in diagnostics["benchmark_return"]
     assert "3" in diagnostics["universe_median_return"]
+    assert benchmark_set["windows_aligned_point_in_time"] is True
+    assert benchmark_set["requested_symbols"] == ["BTCUSDT", "ETHUSDT", "MISSINGUSDT"]
+    assert benchmark_set["available_symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert benchmark_set["missing_symbols"] == ["MISSINGUSDT"]
+    assert benchmark_set["benchmark_return_by_symbol"]["BTCUSDT"]["1"]["trades"] >= 1
+    assert benchmark_set["benchmark_return_by_symbol"]["ETHUSDT"]["3"]["trades"] >= 1
 
 
 def test_strategy_event_study_reports_point_in_time_baselines() -> None:

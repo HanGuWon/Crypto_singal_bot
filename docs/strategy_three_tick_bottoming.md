@@ -82,12 +82,12 @@ python -m crypto_signal_bot.cli strategy event-study --exchange binance --quote 
 ```
 
 The event study compares research variants across forward bar horizons. It uses closed-candle
-signals, next-candle-open diagnostic entries, benchmark windows, and falling-knife exclusion
-summaries. It reports the configured fee/spread/slippage model and zero/configured/double-cost
-sensitivity summaries. It includes deterministic random-symbol and liquidity-ranked baselines using
-the same point-in-time windows. It also reports diagnostic high-volatility, thin-liquidity,
-benchmark-drawdown, and API-outage timestamp-gap slices. It is not a portfolio simulator and does
-not use notification logic.
+signals, next-candle-open diagnostic entries, BTC/ETH benchmark windows, and falling-knife
+exclusion summaries. It reports the configured fee/spread/slippage model and zero/configured/
+double-cost sensitivity summaries. It includes deterministic random-symbol and liquidity-ranked
+baselines using the same point-in-time windows. It also reports diagnostic high-volatility,
+thin-liquidity, benchmark-drawdown, and API-outage timestamp-gap slices. It is not a portfolio
+simulator and does not use notification logic.
 
 ## Alert Safety
 
