@@ -91,6 +91,7 @@ def build_feature_snapshot(
         "quote_volume": latest.quote_volume,
         "quote_volume_z_48": rolling_zscore(quote_volumes, 48),
         "volume_acceleration": _volume_acceleration(quote_volumes),
+        "benchmark_ret_1h": benchmark_ret_1h,
         "relative_strength_1h": relative_strength_1h,
         "spread_bps": spread_bps,
         "upper_wick_ratio": upper_wick_ratio,

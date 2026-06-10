@@ -25,6 +25,7 @@ Feature groups:
 - Volume: quote-volume z-score and acceleration.
 - Breakout: close versus prior rolling high.
 - Relative strength: asset return minus BTC benchmark return when available.
+- Market regime: one-hour BTC/benchmark return when available; neutral fallback when unavailable.
 - Liquidity: quote volume and spread when orderbook data exists.
 - Risk: stale data, failed quality, timestamp drift, wide spread, low liquidity, excess volatility,
   wick risk.

@@ -44,7 +44,7 @@ class ScoringEngine:
         liquidity = _liquidity_score(values)
         breakout = _breakout_score(values)
         relative_strength = _relative_strength_score(values)
-        regime = 55.0
+        regime = _market_regime_score(values)
 
         component_scores = {
             "trend": trend,
@@ -177,6 +177,13 @@ def _breakout_score(values: dict[str, float | None]) -> float:
 
 def _relative_strength_score(values: dict[str, float | None]) -> float:
     return score_from_centered_value(values.get("relative_strength_1h") or 0.0, 0.03)
+
+
+def _market_regime_score(values: dict[str, float | None]) -> float:
+    benchmark_return = values.get("benchmark_ret_1h")
+    if benchmark_return is None:
+        return 55.0
+    return score_from_centered_value(benchmark_return, 0.04)
 
 
 def _penalty(values: dict[str, float | None], risk_flags: list[str]) -> float:
