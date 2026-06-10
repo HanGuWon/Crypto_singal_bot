@@ -109,6 +109,23 @@ def test_event_exposure_diagnostics_are_event_overlap_only() -> None:
     assert exposure["not_portfolio_exposure"] is True
 
 
+def test_walk_forward_diagnostics_use_prior_time_windows_only() -> None:
+    candles_by_symbol = _mock_universe(limit=110)
+    signal_indices = {symbol: [30, 40, 50, 60, 70] for symbol in candles_by_symbol}
+
+    metrics = diagnostic_event_study(candles_by_symbol, signal_indices, benchmark_symbol="BTCUSDT")
+
+    walk_forward = metrics["walk_forward"]
+    assert walk_forward["no_future_feature_normalization"] is True
+    assert walk_forward["expanding_prior_windows"] is True
+    assert walk_forward["fold_count"] >= 2
+    assert walk_forward["aggregate_evaluation_summary"]["trades"] > 0
+    for fold in walk_forward["folds"]:
+        assert fold["fit_end_before_evaluation_start"] is True
+        assert fold["fit_window"]["end_utc"] < fold["evaluation_window"]["start_utc"]
+        assert fold["evaluation_window"]["summary"]["trades"] > 0
+
+
 def test_stress_diagnostics_include_volatility_liquidity_benchmark_and_outage_slices() -> None:
     candles_by_symbol = _mock_universe(limit=100)
     signal_indices = {symbol: [50] for symbol in candles_by_symbol}

@@ -522,17 +522,83 @@ def _overlap_counts(records: list[dict[str, Any]]) -> list[int]:
 
 def _walk_forward_diagnostic(records: list[dict[str, Any]]) -> dict[str, object]:
     ordered = sorted(records, key=lambda record: str(record["signal_time_utc"]))
-    split = len(ordered) // 2
-    feature_window = ordered[:split]
-    evaluation_window = ordered[split:]
+    feature_window, evaluation_window = _chronological_half_split(ordered)
+    folds, fold_evaluation_records = _walk_forward_folds(ordered)
     return {
         "feature_scoring_window": _window_metadata(feature_window),
         "evaluation_window": {
             **_window_metadata(evaluation_window),
             "summary": summarize_returns([record["return"] for record in evaluation_window]),
         },
+        "fold_count": len(folds),
+        "folds": folds,
+        "aggregate_evaluation_summary": summarize_returns([
+            record["return"] for record in fold_evaluation_records
+        ]),
+        "expanding_prior_windows": True,
         "no_future_feature_normalization": True,
     }
+
+
+def _chronological_half_split(
+    ordered: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    times = _unique_signal_times(ordered)
+    if len(times) < 2:
+        return ordered, []
+    split = max(1, len(times) // 2)
+    feature_times = set(times[:split])
+    evaluation_times = set(times[split:])
+    return (
+        [record for record in ordered if str(record["signal_time_utc"]) in feature_times],
+        [record for record in ordered if str(record["signal_time_utc"]) in evaluation_times],
+    )
+
+
+def _walk_forward_folds(
+    ordered: list[dict[str, Any]],
+    *,
+    max_folds: int = 3,
+) -> tuple[list[dict[str, object]], list[dict[str, Any]]]:
+    times = _unique_signal_times(ordered)
+    if len(times) < 2:
+        return [], []
+    fold_count = min(max_folds, len(times) - 1)
+    boundaries = [(index * len(times)) // (fold_count + 1) for index in range(fold_count + 2)]
+    boundaries[-1] = len(times)
+    folds: list[dict[str, object]] = []
+    evaluation_records: list[dict[str, Any]] = []
+    for fold_index in range(1, len(boundaries) - 1):
+        fit_times = set(times[: boundaries[fold_index]])
+        eval_times = set(times[boundaries[fold_index] : boundaries[fold_index + 1]])
+        fit_records = [record for record in ordered if str(record["signal_time_utc"]) in fit_times]
+        eval_records = [record for record in ordered if str(record["signal_time_utc"]) in eval_times]
+        if not fit_records or not eval_records:
+            continue
+        evaluation_records.extend(eval_records)
+        fit_metadata = _window_metadata(fit_records)
+        eval_metadata = _window_metadata(eval_records)
+        folds.append(
+            {
+                "fold": len(folds) + 1,
+                "fit_window": fit_metadata,
+                "evaluation_window": {
+                    **eval_metadata,
+                    "summary": summarize_returns([record["return"] for record in eval_records]),
+                },
+                "fit_end_before_evaluation_start": (
+                    fit_metadata["end_utc"] is not None
+                    and eval_metadata["start_utc"] is not None
+                    and str(fit_metadata["end_utc"]) < str(eval_metadata["start_utc"])
+                ),
+                "expanding_prior_window": True,
+            }
+        )
+    return folds, evaluation_records
+
+
+def _unique_signal_times(records: list[dict[str, Any]]) -> list[str]:
+    return sorted({str(record["signal_time_utc"]) for record in records})
 
 
 def _window_metadata(records: list[dict[str, Any]]) -> dict[str, object]:

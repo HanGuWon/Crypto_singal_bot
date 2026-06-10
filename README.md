@@ -74,7 +74,8 @@ context, cost sensitivity, data-quality-conditioned summaries, and return-distri
 as hit rate, average win/loss, gain/loss factor, Sharpe, Sortino, max drawdown, and tail loss. It is
 not a trading recommendation, not financial advice, and no order is placed. Diagnostic comparisons
 include BTC/universe context plus deterministic random-symbol and liquidity-ranked baselines using
-the same point-in-time windows.
+the same point-in-time windows. Walk-forward diagnostics use expanding prior windows before later
+evaluation windows.
 Stress and calibration sections summarize high-volatility, thin-liquidity, benchmark-drawdown,
 API-outage-flagged, and score-bucket windows when the required diagnostic inputs are available.
 `--from` and `--to` are applied as UTC candle-open bounds; date-only `--to` includes that full UTC
