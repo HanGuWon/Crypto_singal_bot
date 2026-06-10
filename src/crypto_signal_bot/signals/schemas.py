@@ -21,6 +21,9 @@ class SignalCandidate:
     source_run_id: str
     is_closed_candle_signal: bool
     data_quality_status: str
+    raw_symbol: str | None = None
+    base_asset: str | None = None
+    quote_asset: str | None = None
     symbol_health_status: str = "unknown"
     quarantine_reason: str | None = None
     history_bars_available: int = 0
@@ -38,6 +41,9 @@ class SignalCandidate:
         return {
             "exchange": self.exchange,
             "symbol": self.symbol,
+            "raw_symbol": self.raw_symbol,
+            "base_asset": self.base_asset,
+            "quote_asset": self.quote_asset,
             "interval": self.interval,
             "current_price": self.current_price,
             "score": self.score,

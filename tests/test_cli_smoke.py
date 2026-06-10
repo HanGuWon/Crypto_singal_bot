@@ -22,6 +22,9 @@ def test_cli_collect_and_rank_mock_json(tmp_path, monkeypatch, capsys) -> None: 
     assert payload["research_warning"].startswith("Research watchlist only")
     assert len(payload["candidates"]) <= 2
     assert "score" in payload["candidates"][0]
+    assert payload["candidates"][0]["raw_symbol"] == payload["candidates"][0]["symbol"]
+    assert payload["candidates"][0]["base_asset"]
+    assert payload["candidates"][0]["quote_asset"] == "USDT"
     assert "symbol_health_status" in payload["candidates"][0]
     assert "history_bars_available" in payload["candidates"][0]
     assert "benchmark_available" in payload["candidates"][0]

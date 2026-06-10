@@ -166,7 +166,7 @@ large backtests, notifications, and exit guard execution by default.
 
 Each candidate includes:
 
-- exchange, symbol, interval
+- exchange, symbol, raw symbol, base asset, quote asset, interval
 - current price
 - score from 0 to 100
 - component scores
@@ -247,7 +247,8 @@ only when intentionally checking real public API behavior.
 - Notification delivery audit includes a CLI outbox path, but a long-running outbox worker/daemon is
   still a production follow-up.
 - Scoring is interpretable and deterministic but not a profit prediction.
-- Cross-exchange normalization is not implemented.
+- Symbol identity normalization is implemented for Upbit and common Binance spot quote suffixes,
+  but full cross-exchange asset mapping remains intentionally simple.
 - Entry timing logic is an MVP research overlay. It is not connected to orders, private APIs, or
   protective execution features.
 - Protective exit guard work is phase-1 only: docs, config defaults, and intent validation models.

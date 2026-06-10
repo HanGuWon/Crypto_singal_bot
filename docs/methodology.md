@@ -7,6 +7,7 @@ Data flow:
 ```text
 Public market data
   -> local SQLite candles
+  -> exchange/raw/base/quote symbol normalization
   -> data quality checks
   -> closed-candle feature snapshot
   -> composite scoring

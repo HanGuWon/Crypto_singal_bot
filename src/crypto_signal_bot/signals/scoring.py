@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import uuid4
 
+from crypto_signal_bot.data.symbols import normalize_symbol
 from crypto_signal_bot.features.feature_builder import FeatureSnapshot
 from crypto_signal_bot.features.indicators import clip_score, score_from_centered_value
 from crypto_signal_bot.features.normalization import winsorized_component
@@ -67,9 +68,13 @@ class ScoringEngine:
         penalty = sum(_penalties(values, risk_flags).values())
         score = clip_score(weighted - penalty)
         confidence = _confidence(component_scores, risk_flags, snapshot.data_quality_status)
+        identity = normalize_symbol(snapshot.exchange, snapshot.symbol)
         return SignalCandidate(
             exchange=snapshot.exchange,
             symbol=snapshot.symbol,
+            raw_symbol=identity.raw_symbol,
+            base_asset=identity.base_asset,
+            quote_asset=identity.quote_asset,
             interval=snapshot.interval,
             current_price=snapshot.current_price,
             score=round(score, 2),

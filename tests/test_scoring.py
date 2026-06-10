@@ -19,6 +19,9 @@ def test_scoring_is_deterministic_and_bounded() -> None:
     assert 0 <= first.score <= 100
     assert first.component_scores
     assert first.drivers
+    assert first.raw_symbol == "ALPHAUSDT"
+    assert first.base_asset == "ALPHA"
+    assert first.quote_asset == "USDT"
 
 
 def test_scoring_flags_failed_quality_as_low_confidence() -> None:

@@ -29,6 +29,14 @@ class MarketSymbol:
 
 
 @dataclass(frozen=True)
+class SymbolIdentity:
+    exchange: str
+    raw_symbol: str
+    base_asset: str
+    quote_asset: str
+
+
+@dataclass(frozen=True)
 class Candle:
     exchange: str
     symbol: str
