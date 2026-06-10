@@ -1379,17 +1379,21 @@ def _research_run_row_to_dict(row: Any) -> dict[str, object]:
 
 
 def _feature_snapshot_row_to_dict(row: Any) -> dict[str, object]:
+    score_explanation = json.loads(str(row["score_explanation_json"]))
     return {
         "run_id": row["run_id"],
         "exchange": row["exchange"],
         "symbol": row["symbol"],
         "interval": row["interval"],
         "data_timestamp_utc": row["data_timestamp_utc"],
+        "data_freshness_seconds": score_explanation.get("data_freshness_seconds"),
+        "data_quality_status": score_explanation.get("data_quality_status"),
+        "data_quality_warnings": score_explanation.get("data_quality_warnings", []),
         "feature": json.loads(str(row["feature_json"])),
         "component_scores": json.loads(str(row["component_scores_json"])),
         "penalties": json.loads(str(row["penalties_json"])),
         "risk_flags": json.loads(str(row["risk_flags_json"])),
-        "score_explanation": json.loads(str(row["score_explanation_json"])),
+        "score_explanation": score_explanation,
     }
 
 

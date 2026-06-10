@@ -48,6 +48,10 @@ def test_rank_save_run_and_export_is_research_safe(tmp_path, monkeypatch, capsys
     export_payload = _json_output(export_text)
     assert export_payload["run"]["config_hash"]
     assert export_payload["feature_snapshots"]
+    first_snapshot = export_payload["feature_snapshots"][0]
+    assert "data_freshness_seconds" in first_snapshot
+    assert first_snapshot["data_quality_status"] in {"pass", "warn", "fail"}
+    assert isinstance(first_snapshot["data_quality_warnings"], list)
     assert "telegram-secret-token" not in export_text
     assert "discord.com/api/webhooks" not in export_text
     lowered = export_text.lower()

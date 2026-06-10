@@ -123,8 +123,8 @@ python -m crypto_signal_bot.cli runs export RUN_ID --format json
 ```
 
 Saved runs include a commit SHA, safe config hash, data window, candidate count, feature snapshots,
-component contributions, penalties, risk flags, data-quality notes, symbol-health notes, optional
-entry timing snapshots, and the research-only warning. Exports are research artifacts only, not
+component contributions, penalties, risk flags, freshness, data-quality notes, symbol-health notes,
+optional entry timing snapshots, and the research-only warning. Exports are research artifacts only, not
 financial advice or performance claims, and they do not include Telegram tokens, Discord webhook
 URLs, or exchange secrets.
 
