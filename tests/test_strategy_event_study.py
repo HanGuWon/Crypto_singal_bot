@@ -26,6 +26,31 @@ def test_strategy_event_study_has_diagnostic_flags_and_horizons() -> None:
     assert result["horizons"] == [1, 3]
     assert result["signal_counts"]["confirmed_entry_timing"] >= 1
     assert result["variant_summaries"]["confirmed_entry_timing"]["1"]["trades"] >= 1
+    assert result["cost_model"]["applied_to_variant_summaries"] is True
+
+
+def test_strategy_event_study_reports_cost_sensitivity() -> None:
+    result = strategy_event_study(
+        _strategy_universe(),
+        benchmark_symbol="BTCUSDT",
+        config=StrategyEventStudyConfig(
+            horizons=(1,),
+            min_history_bars=20,
+            fee_bps=20.0,
+            spread_bps=10.0,
+            slippage_bps=10.0,
+        ),
+    )
+
+    sensitivity = result["cost_sensitivity"]["scenarios"]
+    zero_summary = sensitivity["zero_cost"]["variant_summaries"]["confirmed_entry_timing"]["1"]
+    configured_summary = sensitivity["configured_cost"]["variant_summaries"]["confirmed_entry_timing"]["1"]
+    double_summary = sensitivity["double_configured_cost"]["variant_summaries"]["confirmed_entry_timing"]["1"]
+
+    assert result["cost_model"]["round_trip_cost_bps"] == 40.0
+    assert configured_summary["trades"] == zero_summary["trades"]
+    assert configured_summary["average_return"] < zero_summary["average_return"]
+    assert double_summary["average_return"] < configured_summary["average_return"]
 
 
 def test_strategy_signals_use_closed_candles_only() -> None:

@@ -83,8 +83,9 @@ calendar day.
 
 The entry timing strategy event-study utilities are diagnostic-only and keep the same closed-candle
 signal / next-candle-open entry rule. They compare strategy variants, forward horizons, benchmark
-windows, and falling-knife exclusion effects without using notification logic. The CLI entry point is
-`strategy event-study`.
+windows, fee/spread/slippage cost sensitivity, and falling-knife exclusion effects without using
+notification logic. The CLI entry point is `strategy event-study`; use `--fee-bps`, `--spread-bps`,
+and `--slippage-bps` to adjust the diagnostic cost model.
 
 Notification formatting test:
 

@@ -220,6 +220,9 @@ def _build_parser() -> argparse.ArgumentParser:
     strategy_event_study.add_argument("--interval", default="5m")
     strategy_event_study.add_argument("--horizons", default="1,3,6,12", help="Comma-separated forward bar horizons.")
     strategy_event_study.add_argument("--min-history-bars", type=int, default=None)
+    strategy_event_study.add_argument("--fee-bps", type=float, default=10.0)
+    strategy_event_study.add_argument("--spread-bps", type=float, default=5.0)
+    strategy_event_study.add_argument("--slippage-bps", type=float, default=5.0)
     strategy_event_study.add_argument("--format", choices=["table", "json"], default="json")
     strategy_event_study.add_argument("--mock", action="store_true", help="Seed deterministic fixture data first.")
 
@@ -721,6 +724,9 @@ def _strategy_event_study(args: argparse.Namespace, settings: Settings) -> int:
     min_history_bars = args.min_history_bars if args.min_history_bars is not None else settings.min_history_bars
     if min_history_bars <= 0:
         raise ConfigError("min-history-bars must be positive.")
+    _validate_non_negative_bps(args.fee_bps, "--fee-bps")
+    _validate_non_negative_bps(args.spread_bps, "--spread-bps")
+    _validate_non_negative_bps(args.slippage_bps, "--slippage-bps")
 
     store = SQLiteStore(settings.database_path)
     if args.mock:
@@ -743,6 +749,9 @@ def _strategy_event_study(args: argparse.Namespace, settings: Settings) -> int:
         config=StrategyEventStudyConfig(
             min_history_bars=min_history_bars,
             horizons=horizons,
+            fee_bps=args.fee_bps,
+            spread_bps=args.spread_bps,
+            slippage_bps=args.slippage_bps,
         ),
     )
     if args.format == "json":
@@ -768,8 +777,21 @@ def _parse_positive_int_csv(value: str, *, field_name: str) -> tuple[int, ...]:
     return tuple(parsed)
 
 
+def _validate_non_negative_bps(value: float, option_name: str) -> None:
+    if value < 0:
+        raise ConfigError(f"{option_name} must be non-negative.")
+
+
 def _print_strategy_event_study_table(metrics: dict[str, object]) -> None:
     print(str(metrics["research_warning"]))
+    cost_model = metrics.get("cost_model", {})
+    if isinstance(cost_model, dict):
+        print(
+            "Cost model: "
+            f"fee={cost_model.get('fee_bps', 0)}bps "
+            f"spread={cost_model.get('spread_bps', 0)}bps "
+            f"slippage={cost_model.get('slippage_bps', 0)}bps"
+        )
     horizons = metrics.get("horizons", [])
     display_horizon = str(horizons[0]) if isinstance(horizons, list) and horizons else "1"
     print(f"Variant                                Signals  H{display_horizon} Trades  H{display_horizon} Avg Return")

@@ -565,6 +565,12 @@ def test_cli_strategy_event_study_mock_json(tmp_path, monkeypatch, capsys) -> No
             "5m",
             "--horizons",
             "1,3",
+            "--fee-bps",
+            "12",
+            "--spread-bps",
+            "6",
+            "--slippage-bps",
+            "4",
             "--format",
             "json",
             "--mock",
@@ -577,8 +583,34 @@ def test_cli_strategy_event_study_mock_json(tmp_path, monkeypatch, capsys) -> No
     assert payload["next_open_entry_enforced"] is True
     assert payload["notification_logic_excluded"] is True
     assert payload["horizons"] == [1, 3]
+    assert payload["cost_model"]["fee_bps"] == 12.0
+    assert payload["cost_model"]["spread_bps"] == 6.0
+    assert payload["cost_model"]["slippage_bps"] == 4.0
+    assert "cost_sensitivity" in payload
     assert "variant_summaries" in payload
     assert "buy now" not in json.dumps(payload).lower()
+
+
+def test_cli_strategy_event_study_rejects_negative_costs(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "strategy",
+            "event-study",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--fee-bps",
+            "-1",
+            "--mock",
+        ]
+    ) == 2
+
+    assert "--fee-bps must be non-negative" in capsys.readouterr().err
 
 
 def test_cli_strategy_event_study_rejects_invalid_horizons(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]

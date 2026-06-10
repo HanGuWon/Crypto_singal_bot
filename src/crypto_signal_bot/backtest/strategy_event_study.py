@@ -57,11 +57,13 @@ def strategy_event_study(
         **_strategy_diagnostic_flags(),
         "variants": list(STRATEGY_VARIANTS),
         "horizons": list(cfg.horizons),
+        "cost_model": _cost_model(cfg),
         "signal_counts": {
             variant: len(signal_records[variant])
             for variant in STRATEGY_VARIANTS
         },
         "variant_summaries": summaries,
+        "cost_sensitivity": _cost_sensitivity(candles_by_symbol, signal_records, cfg),
         "benchmark_diagnostics": _benchmark_diagnostics(
             candles_by_symbol,
             signal_records,
@@ -208,14 +210,58 @@ def _variant_horizon_summaries(
     candles_by_symbol: dict[str, list[Candle]],
     records: list[dict[str, Any]],
     config: StrategyEventStudyConfig,
+    *,
+    cost: float | None = None,
 ) -> dict[str, dict[str, float]]:
+    applied_cost = config.round_trip_cost if cost is None else cost
     return {
         str(horizon): summarize_returns([
             ret
             for record in records
-            if (ret := _forward_return(candles_by_symbol, record, horizon, config.round_trip_cost)) is not None
+            if (ret := _forward_return(candles_by_symbol, record, horizon, applied_cost)) is not None
         ])
         for horizon in config.horizons
+    }
+
+
+def _cost_model(config: StrategyEventStudyConfig) -> dict[str, object]:
+    return {
+        "fee_bps": config.fee_bps,
+        "spread_bps": config.spread_bps,
+        "slippage_bps": config.slippage_bps,
+        "round_trip_cost_bps": config.fee_bps + config.spread_bps + config.slippage_bps,
+        "round_trip_cost_fraction": config.round_trip_cost,
+        "applied_to_variant_summaries": True,
+    }
+
+
+def _cost_sensitivity(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_records: dict[str, list[dict[str, Any]]],
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    scenarios = {
+        "zero_cost": 0.0,
+        "configured_cost": config.round_trip_cost,
+        "double_configured_cost": config.round_trip_cost * 2,
+    }
+    return {
+        "scenarios": {
+            name: {
+                "round_trip_cost_fraction": cost,
+                "round_trip_cost_bps": cost * 10000,
+                "variant_summaries": {
+                    variant: _variant_horizon_summaries(
+                        candles_by_symbol,
+                        signal_records[variant],
+                        config,
+                        cost=cost,
+                    )
+                    for variant in STRATEGY_VARIANTS
+                },
+            }
+            for name, cost in scenarios.items()
+        }
     }
 
 
