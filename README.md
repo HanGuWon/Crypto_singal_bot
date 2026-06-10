@@ -78,8 +78,8 @@ tail loss. It also exposes diagnostic turnover and event-overlap exposure fields
 signal windows, not order turnover or account exposure. It is not a trading recommendation, not
 financial advice, and no order is placed. Diagnostic comparisons include BTC/ETH benchmark-set
 context, universe context, and deterministic random-symbol and liquidity-ranked baselines using the
-same point-in-time windows. Walk-forward diagnostics use expanding prior windows before later
-evaluation windows.
+same point-in-time windows. Baselines also include a point-in-time top-volume equal-weight basket.
+Walk-forward diagnostics use expanding prior windows before later evaluation windows.
 Universe diagnostics list requested symbols, evaluable symbols, empty candle symbols, and
 delisted-or-missing asset candidates where the local candle inputs make that detectable. They are
 survivorship-bias audit aids, not a complete delisting database.

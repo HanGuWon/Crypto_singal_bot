@@ -131,6 +131,9 @@ def test_diagnostic_baselines_use_same_point_in_time_windows() -> None:
     assert baselines["windows_aligned_point_in_time"] is True
     assert baselines["deterministic_random_symbol_return"]["trades"] == 6.0
     assert baselines["liquidity_ranked_symbol_return"]["trades"] == 6.0
+    assert baselines["top_volume_equal_weight_basket_return"]["trades"] == 6.0
+    assert baselines["top_volume_basket_size"] == 3
+    assert baselines["top_volume_basket_point_in_time"] is True
     assert "not portfolio execution models" in baselines["baseline_notes"]
 
 

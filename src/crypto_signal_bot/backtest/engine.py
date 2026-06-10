@@ -231,6 +231,11 @@ def _baseline_diagnostics(
         "liquidity_ranked_symbol_return": summarize_returns(
             _liquidity_ranked_baseline_returns(candles_by_symbol, records, assumptions)
         ),
+        "top_volume_equal_weight_basket_return": summarize_returns(
+            _top_volume_equal_weight_basket_returns(candles_by_symbol, records, assumptions)
+        ),
+        "top_volume_basket_size": 3,
+        "top_volume_basket_point_in_time": True,
         "baseline_notes": (
             "Baselines are deterministic event-study diagnostics using the same signal windows. "
             "They are not portfolio execution models."
@@ -307,6 +312,34 @@ def _liquidity_ranked_baseline_returns(
         ret = _window_return(candles_by_symbol[selected], index, assumptions)
         if ret is not None:
             returns.append(ret)
+    return returns
+
+
+def _top_volume_equal_weight_basket_returns(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    assumptions: BacktestAssumptions,
+    basket_size: int = 3,
+) -> list[float]:
+    returns: list[float] = []
+    for record in records:
+        index = int(record["signal_index"])
+        symbols = _eligible_symbols_for_window(candles_by_symbol, index, assumptions)
+        ranked = sorted(
+            symbols,
+            key=lambda symbol: (
+                candles_by_symbol[symbol][index].quote_volume or 0.0,
+                symbol,
+            ),
+            reverse=True,
+        )
+        basket_returns = [
+            value
+            for symbol in ranked[:basket_size]
+            if (value := _window_return(candles_by_symbol[symbol], index, assumptions)) is not None
+        ]
+        if basket_returns:
+            returns.append(sum(basket_returns) / len(basket_returns))
     return returns
 
 

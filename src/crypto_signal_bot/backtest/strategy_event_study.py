@@ -404,6 +404,14 @@ def _strategy_baseline_diagnostics(
                     config,
                     selector="liquidity_ranked",
                 ),
+                "top_volume_equal_weight_basket_return": _baseline_horizon_summaries(
+                    candles_by_symbol,
+                    records,
+                    config,
+                    selector="top_volume_equal_weight_basket",
+                ),
+                "top_volume_basket_size": 3,
+                "top_volume_basket_point_in_time": True,
             }
             for variant, records in signal_records.items()
         },
@@ -557,6 +565,31 @@ def _baseline_returns(
                     symbol,
                 ),
             )
+        elif selector == "top_volume_equal_weight_basket":
+            selected_symbols = sorted(
+                symbols,
+                key=lambda symbol: (
+                    candles_by_symbol[symbol][int(record["signal_index"])].quote_volume or 0.0,
+                    symbol,
+                ),
+                reverse=True,
+            )[:3]
+            basket_returns = [
+                value
+                for symbol in selected_symbols
+                if (
+                    value := _symbol_forward_return(
+                        candles_by_symbol[symbol],
+                        int(record["signal_index"]),
+                        horizon_bars,
+                        cost,
+                    )
+                )
+                is not None
+            ]
+            if basket_returns:
+                returns.append(sum(basket_returns) / len(basket_returns))
+            continue
         else:
             raise ValueError(f"Unknown baseline selector: {selector}")
         ret = _symbol_forward_return(

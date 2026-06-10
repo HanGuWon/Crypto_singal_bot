@@ -141,6 +141,9 @@ def test_strategy_event_study_reports_point_in_time_baselines() -> None:
     assert baselines["applied_round_trip_cost_fraction"] == 0.002
     assert confirmed["deterministic_random_symbol_return"]["1"]["trades"] >= 1
     assert confirmed["liquidity_ranked_symbol_return"]["3"]["trades"] >= 1
+    assert confirmed["top_volume_equal_weight_basket_return"]["1"]["trades"] >= 1
+    assert confirmed["top_volume_basket_size"] == 3
+    assert confirmed["top_volume_basket_point_in_time"] is True
     assert "execution models" in baselines["baseline_notes"]
 
 

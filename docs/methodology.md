@@ -45,9 +45,10 @@ tail loss. These are event-study diagnostics, not a portfolio execution model.
 
 Baseline diagnostics compare the same event windows against BTC/ETH benchmark sets, universe
 median/equal-weight returns, deterministic random-symbol selection, and a point-in-time
-liquidity-ranked symbol. Event turnover and exposure fields describe signal-window overlap only;
-top-level turnover/exposure diagnostics repeat those fields explicitly and are not account
-exposure, allocation, or order execution.
+liquidity-ranked symbol. They also include a point-in-time top-volume equal-weight basket benchmark.
+Event turnover and exposure fields describe signal-window overlap only; top-level
+turnover/exposure diagnostics repeat those fields explicitly and are not account exposure,
+allocation, or order execution.
 Universe diagnostics list requested signal symbols, available candle symbols, empty candle symbols,
 and delisted-or-missing asset candidates when those gaps are visible in the local input set. This is
 a survivorship-bias audit aid only, not a complete exchange delisting database.
