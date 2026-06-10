@@ -218,6 +218,9 @@ default. It does not add private exchange calls or live order submission.
 
 See `docs/protective_exit_guard.md` and `docs/discord_exit_alerts.md` for the safety boundary.
 
+See `docs/acceptance_audit.md` for the current requirement-by-requirement evidence map and known
+gaps.
+
 ## GCP Free-Tier Profile
 
 `configs/gcp_free_tier.yaml` and `docs/deploy_gcp_free_tier.md` provide a conservative VM-oriented
