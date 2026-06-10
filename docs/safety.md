@@ -61,6 +61,9 @@ Protective exit guard note:
   exchange adapters or order submission.
 - The orderbook preflight uses public depth snapshots only and blocks dry-run review when the
   snapshot is missing, stale, shallow, or above the configured slippage threshold.
+- The exit guard symbol allowlist is required by default. A symbol that is not listed in
+  `EXIT_GUARD_SYMBOL_ALLOWLIST` produces a blocked dry-run event and cannot create a manual
+  approval request.
 - Preflight age and slippage thresholds are configurable, but invalid non-positive values fail
   closed during config validation.
 - Manual approval requests are audit records only. Recording an approval does not enable private

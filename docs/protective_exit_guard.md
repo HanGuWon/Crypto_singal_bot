@@ -28,6 +28,7 @@ EXIT_GUARD_PRIVATE_READ_ENABLED=false
 EXIT_GUARD_LIVE_EXIT_ENABLED=false
 EXIT_GUARD_REQUIRE_MANUAL_APPROVAL=true
 EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST=true
+EXIT_GUARD_SYMBOL_ALLOWLIST=
 EXIT_GUARD_DISCORD_ALERTS_ENABLED=false
 EXIT_GUARD_TELEGRAM_ENABLED=false
 EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30
@@ -44,6 +45,8 @@ open private sessions, and does not submit orders.
 
 The preflight blocks when:
 
+- `EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST=true` and the symbol is not listed in
+  `EXIT_GUARD_SYMBOL_ALLOWLIST`
 - no public orderbook snapshot is available
 - the snapshot is stale or timestamped in the future
 - the relevant bid or ask side has no usable depth
@@ -54,6 +57,8 @@ The default public orderbook preflight thresholds are 30 seconds of maximum snap
 maximum estimated adverse slippage. They can be adjusted with
 `EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS` and `EXIT_GUARD_MAX_SLIPPAGE_PCT`, or overridden per CLI
 dry-run with `--max-orderbook-age-seconds` and `--max-slippage-pct`.
+The allowlist accepts comma-separated raw symbols or exchange-scoped symbols, for example
+`BTCUSDT,upbit_spot:KRW-BTC`.
 
 For sell-only spot review and close-long futures review, the preflight walks public bids. For
 close-short futures review, it walks public asks. The result is an assessment with `pass` or
@@ -96,8 +101,9 @@ Adding `--request-approval` creates a manual approval request bound to the dry-r
 validated risk-reducing intent. Each request stores a deterministic binding hash over the source
 event, exchange, symbol, action, side, quantity, position mode, and position side so later audit
 inspection can verify the approval scope. Approval requests expire, can be approved or rejected
-only with `--confirm`, and remain audit records only. They do not enable private reads, live
-orders, sell orders, close orders, or any exchange endpoint.
+only with `--confirm`, and remain audit records only. Requests are not created when the public
+preflight is blocked, including when the symbol is not allowlisted. They do not enable private
+reads, live orders, sell orders, close orders, or any exchange endpoint.
 
 ## Upbit Spot Sell-Only Shape
 

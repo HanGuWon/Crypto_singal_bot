@@ -61,5 +61,6 @@ safety:
   exit_guard_private_read_enabled: false
   exit_guard_live_exit_enabled: false
   exit_guard_require_symbol_whitelist: true
+  exit_guard_symbol_allowlist: []
   exit_guard_max_orderbook_age_seconds: 30
   exit_guard_max_slippage_pct: 1.0

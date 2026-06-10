@@ -839,6 +839,7 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         raise ConfigError("--max-orderbook-age-seconds must be positive.")
     if max_slippage_pct <= 0:
         raise ConfigError("--max-slippage-pct must be positive.")
+    symbol_allowlist = _exit_guard_symbol_allowlist_status(settings, args.exchange, args.symbol)
     now = utc_now()
     store = SQLiteStore(settings.database_path)
     orderbook = (
@@ -856,16 +857,24 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         max_orderbook_age_seconds=max_orderbook_age_seconds,
         max_slippage_pct=max_slippage_pct,
     )
+    preflight_risk_flags = list(slippage.risk_flags)
+    if symbol_allowlist["status"] != "pass":
+        preflight_risk_flags.append("exit_guard_symbol_not_allowlisted")
+    preflight_passed = slippage.passed and symbol_allowlist["status"] == "pass"
     signal = ProtectiveExitSignal(
         signal_id=str(uuid4()),
         created_at_utc=now,
         exchange=args.exchange,
         symbol=args.symbol,
         interval=args.interval,
-        state="BLOCKED" if not slippage.passed else "WATCHING",
-        exit_score=75.0 if not slippage.passed else 35.0,
-        drivers=["public_orderbook_preflight", f"action:{intent.action}"],
-        risk_flags=slippage.risk_flags,
+        state="WATCHING" if preflight_passed else "BLOCKED",
+        exit_score=35.0 if preflight_passed else 75.0,
+        drivers=[
+            "public_orderbook_preflight",
+            f"action:{intent.action}",
+            f"symbol_allowlist:{symbol_allowlist['status']}",
+        ],
+        risk_flags=_unique_strings(preflight_risk_flags),
         is_closed_candle_signal=True,
         data_quality_status="pass",
     )
@@ -876,14 +885,19 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
     if event_saved:
         store.insert_alert_event(event)
     approval_request = None
+    approval_note = "not_requested"
     if args.request_approval:
-        approval_request = _create_manual_approval_request(
-            store,
-            event=event,
-            intent=intent,
-            created_at=now,
-            ttl_minutes=args.approval_ttl_minutes,
-        )
+        if preflight_passed:
+            approval_request = _create_manual_approval_request(
+                store,
+                event=event,
+                intent=intent,
+                created_at=now,
+                ttl_minutes=args.approval_ttl_minutes,
+            )
+            approval_note = "created"
+        else:
+            approval_note = "skipped because exit guard preflight is blocked"
     notification_results: list[dict[str, object]] = []
     delivery_audit_count = 0
     notification_note = "not_requested"
@@ -934,6 +948,7 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
             "orderbook_source": "mock" if args.mock_orderbook else "database",
             "max_orderbook_age_seconds": max_orderbook_age_seconds,
             "max_slippage_pct": max_slippage_pct,
+            "symbol_allowlist": symbol_allowlist,
             "intent": _exit_guard_intent_to_dict(intent),
             "orderbook_available": orderbook is not None,
             "slippage_assessment": _slippage_assessment_to_dict(slippage),
@@ -945,6 +960,7 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
             "delivery_audit_recorded": delivery_audit_count > 0,
             "delivery_audit_count": delivery_audit_count,
             "manual_approval_request": approval_request,
+            "manual_approval_note": approval_note,
             "research_warning": (
                 "Protective exit guard dry-run research only. Not financial advice. "
                 "No new position was opened. No order was placed."
@@ -952,6 +968,33 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         }
     )
     return 0
+
+
+def _exit_guard_symbol_allowlist_status(
+    settings: Settings,
+    exchange: str,
+    symbol: str,
+) -> dict[str, object]:
+    entries = {entry.upper() for entry in settings.exit_guard.symbol_allowlist}
+    if not settings.exit_guard.require_symbol_whitelist:
+        return {
+            "required": False,
+            "status": "pass",
+            "matched": None,
+            "configured_entries": len(entries),
+        }
+    candidates = [
+        symbol.upper(),
+        f"{exchange}:{symbol}".upper(),
+        f"{_store_exchange_for_exit_guard(exchange)}:{symbol}".upper(),
+    ]
+    matched = next((candidate for candidate in candidates if candidate in entries), None)
+    return {
+        "required": True,
+        "status": "pass" if matched is not None else "blocked",
+        "matched": matched,
+        "configured_entries": len(entries),
+    }
 
 
 def _create_manual_approval_request(

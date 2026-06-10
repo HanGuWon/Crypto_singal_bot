@@ -9,6 +9,10 @@ from crypto_signal_bot.data.store import SQLiteStore
 from crypto_signal_bot.notifications.base import NotificationResult
 
 
+def _allow_exit_guard_symbols(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("EXIT_GUARD_SYMBOL_ALLOWLIST", "BTCUSDT,KRW-BTC")
+
+
 def test_cli_collect_and_rank_mock_json(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Seoul")
@@ -46,6 +50,7 @@ def test_cli_notify_skipped_when_disabled(tmp_path, monkeypatch, capsys) -> None
 
 def test_cli_exit_guard_preflight_mock_outputs_research_event(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+    _allow_exit_guard_symbols(monkeypatch)
 
     assert main(
         [
@@ -86,9 +91,57 @@ def test_cli_exit_guard_preflight_mock_outputs_research_event(tmp_path, monkeypa
     assert "buy now" not in json.dumps(payload).lower()
 
 
+def test_cli_exit_guard_blocks_unallowlisted_symbol_before_manual_approval(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    assert main(
+        [
+            "exit-guard",
+            "preflight",
+            "--exchange",
+            "binance_usdm_futures",
+            "--symbol",
+            "BTCUSDT",
+            "--interval",
+            "5m",
+            "--action",
+            "close_long",
+            "--side",
+            "SELL",
+            "--quantity",
+            "2",
+            "--position-mode",
+            "one_way",
+            "--position-side",
+            "BOTH",
+            "--reduce-only",
+            "--mock-orderbook",
+            "--request-approval",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["symbol_allowlist"]["required"] is True
+    assert payload["symbol_allowlist"]["status"] == "blocked"
+    assert payload["slippage_assessment"]["status"] == "pass"
+    assert payload["alert_event"]["event_type"] == "PROTECTIVE_EXIT_BLOCKED"
+    assert "exit_guard_symbol_not_allowlisted" in payload["alert_event"]["risk_flags"]
+    assert payload["manual_approval_request"] is None
+    assert payload["manual_approval_note"] == "skipped because exit guard preflight is blocked"
+
+    store = SQLiteStore(db_path)
+    assert store.list_manual_approval_requests(status="pending") == []
+
+
 def test_cli_exit_guard_notify_skips_when_disabled(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     db_path = tmp_path / "test.sqlite"
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    _allow_exit_guard_symbols(monkeypatch)
 
     assert main(
         [
@@ -171,6 +224,7 @@ def test_cli_exit_guard_notify_uses_discord_only_when_enabled(tmp_path, monkeypa
 
     db_path = tmp_path / "test.sqlite"
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    _allow_exit_guard_symbols(monkeypatch)
     monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
     monkeypatch.setenv("DISCORD_WEBHOOK_ENABLED", "true")
     monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/secret-token")
@@ -233,6 +287,7 @@ def test_cli_exit_guard_notify_uses_discord_only_when_enabled(tmp_path, monkeypa
 
 def test_cli_exit_guard_uses_configured_preflight_thresholds(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+    _allow_exit_guard_symbols(monkeypatch)
     monkeypatch.setenv("EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS", "45")
     monkeypatch.setenv("EXIT_GUARD_MAX_SLIPPAGE_PCT", "0.05")
 
@@ -269,6 +324,7 @@ def test_cli_exit_guard_uses_configured_preflight_thresholds(tmp_path, monkeypat
 def test_cli_exit_guard_can_save_preflight_event_to_audit_table(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     db_path = tmp_path / "test.sqlite"
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    _allow_exit_guard_symbols(monkeypatch)
 
     assert main(
         [
@@ -313,6 +369,7 @@ def test_cli_exit_guard_can_save_preflight_event_to_audit_table(tmp_path, monkey
 def test_cli_exit_guard_manual_approval_request_is_audit_only(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     db_path = tmp_path / "test.sqlite"
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    _allow_exit_guard_symbols(monkeypatch)
 
     assert main(
         [

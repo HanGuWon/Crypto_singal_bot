@@ -23,6 +23,10 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def _parse_csv(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class ExitGuardSettings:
     enabled: bool = False
@@ -33,6 +37,7 @@ class ExitGuardSettings:
     require_symbol_whitelist: bool = True
     discord_alerts_enabled: bool = False
     telegram_enabled: bool = False
+    symbol_allowlist: tuple[str, ...] = ()
     max_orderbook_age_seconds: int = 30
     max_slippage_pct: float = 1.0
 
@@ -201,6 +206,7 @@ def load_settings() -> Settings:
             ),
             discord_alerts_enabled=_parse_bool(_env("EXIT_GUARD_DISCORD_ALERTS_ENABLED", "false")),
             telegram_enabled=_parse_bool(_env("EXIT_GUARD_TELEGRAM_ENABLED", "false")),
+            symbol_allowlist=_parse_csv(_env("EXIT_GUARD_SYMBOL_ALLOWLIST", "")),
             max_orderbook_age_seconds=int(_env("EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS", "30")),
             max_slippage_pct=float(_env("EXIT_GUARD_MAX_SLIPPAGE_PCT", "1.0")),
         ),

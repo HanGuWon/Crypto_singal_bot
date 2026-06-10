@@ -20,6 +20,8 @@ def test_gcp_free_tier_profile_is_conservative() -> None:
     assert "outbox_drain_timer_enabled: false" in profile
     assert "outbox_drain_max_rows: 10" in profile
     assert "exit_guard_live_exit_enabled: false" in profile
+    assert "exit_guard_require_symbol_whitelist: true" in profile
+    assert "exit_guard_symbol_allowlist: []" in profile
     assert "exit_guard_max_orderbook_age_seconds: 30" in profile
     assert "exit_guard_max_slippage_pct: 1.0" in profile
     assert "us-west1" in profile
@@ -56,6 +58,8 @@ def test_gcp_free_tier_docs_keep_safety_defaults_visible() -> None:
     assert "PRIVATE_API_ENABLED=false" in docs
     assert "NOTIFICATIONS_ENABLED=false" in docs
     assert "EXIT_GUARD_LIVE_EXIT_ENABLED=false" in docs
+    assert "EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST=true" in docs
+    assert "EXIT_GUARD_SYMBOL_ALLOWLIST=" in docs
     assert "EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30" in docs
     assert "EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0" in docs
     assert "notifications outbox drain --max 10" in docs

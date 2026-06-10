@@ -29,6 +29,7 @@ def test_default_config_is_research_only() -> None:
     assert settings.exit_guard.require_symbol_whitelist is True
     assert settings.exit_guard.discord_alerts_enabled is False
     assert settings.exit_guard.telegram_enabled is False
+    assert settings.exit_guard.symbol_allowlist == ()
     assert settings.exit_guard.max_orderbook_age_seconds == 30
     assert settings.exit_guard.max_slippage_pct == 1.0
 
@@ -87,8 +88,10 @@ def test_exit_guard_discord_alerts_require_webhook_url() -> None:
 def test_exit_guard_thresholds_load_from_environment(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS", "45")
     monkeypatch.setenv("EXIT_GUARD_MAX_SLIPPAGE_PCT", "0.75")
+    monkeypatch.setenv("EXIT_GUARD_SYMBOL_ALLOWLIST", "BTCUSDT, upbit_spot:KRW-BTC")
 
     settings = load_settings()
 
     assert settings.exit_guard.max_orderbook_age_seconds == 45
     assert settings.exit_guard.max_slippage_pct == 0.75
+    assert settings.exit_guard.symbol_allowlist == ("BTCUSDT", "upbit_spot:KRW-BTC")

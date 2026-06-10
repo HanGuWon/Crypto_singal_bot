@@ -107,13 +107,16 @@ The preflight command builds a research JSON event from public orderbook data on
 flag still does nothing unless global notifications, Discord webhook notifications, and
 `EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are explicitly configured. Default preflight thresholds
 are `EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30` and `EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0`; both can be
-overridden per dry-run command. `--save-event` persists the dry-run `AlertEvent` to the local audit
-table without sending a notification or placing an order. When `--notify` is used, the generated
-`AlertEvent` is also persisted for auditability and each delivery attempt, failure, or disabled
-skip is recorded in `notification_deliveries`. `exit-guard events show ALERT_EVENT_ID` includes the
-saved event and its notification delivery audit rows. `--request-approval` creates a bounded manual
-approval audit record with a binding hash for the source event, exchange, symbol, side, quantity,
-and position scope. Approval decisions are records only; they do not unlock live execution.
+overridden per dry-run command. `EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST=true` is also the default; set
+`EXIT_GUARD_SYMBOL_ALLOWLIST` to comma-separated symbols such as `BTCUSDT,upbit_spot:KRW-BTC`
+before expecting a dry-run preflight to become approval-eligible. `--save-event` persists the
+dry-run `AlertEvent` to the local audit table without sending a notification or placing an order.
+When `--notify` is used, the generated `AlertEvent` is also persisted for auditability and each
+delivery attempt, failure, or disabled skip is recorded in `notification_deliveries`. `exit-guard
+events show ALERT_EVENT_ID` includes the saved event and its notification delivery audit rows.
+`--request-approval` creates a bounded manual approval audit record with a binding hash for the
+source event, exchange, symbol, side, quantity, and position scope only when the public preflight
+passes. Approval decisions are records only; they do not unlock live execution.
 
 Database maintenance:
 
