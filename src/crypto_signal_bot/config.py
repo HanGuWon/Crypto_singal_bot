@@ -33,6 +33,8 @@ class ExitGuardSettings:
     require_symbol_whitelist: bool = True
     discord_alerts_enabled: bool = False
     telegram_enabled: bool = False
+    max_orderbook_age_seconds: int = 30
+    max_slippage_pct: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -113,6 +115,10 @@ class Settings:
             raise ConfigError("EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST must remain true in this MVP.")
         if self.exit_guard.telegram_enabled:
             raise ConfigError("Exit guard uses Discord-only alerts; Telegram is not allowed.")
+        if self.exit_guard.max_orderbook_age_seconds <= 0:
+            raise ConfigError("EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS must be positive.")
+        if self.exit_guard.max_slippage_pct <= 0:
+            raise ConfigError("EXIT_GUARD_MAX_SLIPPAGE_PCT must be positive.")
         if self.exit_guard.discord_alerts_enabled and (
             not self.notifications_enabled or not self.discord_webhook_enabled
         ):
@@ -195,6 +201,8 @@ def load_settings() -> Settings:
             ),
             discord_alerts_enabled=_parse_bool(_env("EXIT_GUARD_DISCORD_ALERTS_ENABLED", "false")),
             telegram_enabled=_parse_bool(_env("EXIT_GUARD_TELEGRAM_ENABLED", "false")),
+            max_orderbook_age_seconds=int(_env("EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS", "30")),
+            max_slippage_pct=float(_env("EXIT_GUARD_MAX_SLIPPAGE_PCT", "1.0")),
         ),
     )
     settings.validate_safety()

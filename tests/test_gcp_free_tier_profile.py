@@ -18,6 +18,8 @@ def test_gcp_free_tier_profile_is_conservative() -> None:
     assert "live_trading_enabled: false" in profile
     assert "private_api_enabled: false" in profile
     assert "exit_guard_live_exit_enabled: false" in profile
+    assert "exit_guard_max_orderbook_age_seconds: 30" in profile
+    assert "exit_guard_max_slippage_pct: 1.0" in profile
     assert "us-west1" in profile
     assert "us-central1" in profile
     assert "us-east1" in profile
@@ -50,5 +52,7 @@ def test_gcp_free_tier_docs_keep_safety_defaults_visible() -> None:
     assert "PRIVATE_API_ENABLED=false" in docs
     assert "NOTIFICATIONS_ENABLED=false" in docs
     assert "EXIT_GUARD_LIVE_EXIT_ENABLED=false" in docs
+    assert "EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30" in docs
+    assert "EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0" in docs
     assert "asia-northeast3" in docs
     assert "Always Free" in docs

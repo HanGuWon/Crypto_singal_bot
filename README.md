@@ -100,7 +100,9 @@ python -m crypto_signal_bot.cli exit-guard preflight --exchange upbit_spot --sym
 
 The preflight command builds a research JSON event from public orderbook data only. The `--notify`
 flag still does nothing unless global notifications, Discord webhook notifications, and
-`EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are explicitly configured.
+`EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are explicitly configured. Default preflight thresholds
+are `EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30` and `EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0`; both can be
+overridden per dry-run command.
 
 Database maintenance:
 

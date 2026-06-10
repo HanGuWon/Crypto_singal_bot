@@ -77,6 +77,8 @@ def test_cli_exit_guard_preflight_mock_outputs_research_event(tmp_path, monkeypa
     assert payload["live_order_submitted"] is False
     assert payload["exchange_order_endpoint_used"] is False
     assert payload["orderbook_source"] == "mock"
+    assert payload["max_orderbook_age_seconds"] == 30
+    assert payload["max_slippage_pct"] == 1.0
     assert payload["slippage_assessment"]["status"] == "pass"
     assert payload["alert_event"]["event_type"] == "PROTECTIVE_EXIT_WATCH"
     assert "No order was placed" in payload["research_warning"]
@@ -109,6 +111,41 @@ def test_cli_exit_guard_notify_skips_when_disabled(tmp_path, monkeypatch, capsys
     assert payload["notification_note"].startswith("notifications skipped")
     assert payload["notification_results"][0]["status"] == "skipped"
     assert payload["intent"]["dry_run"] is True
+
+
+def test_cli_exit_guard_uses_configured_preflight_thresholds(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+    monkeypatch.setenv("EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS", "45")
+    monkeypatch.setenv("EXIT_GUARD_MAX_SLIPPAGE_PCT", "0.05")
+
+    assert main(
+        [
+            "exit-guard",
+            "preflight",
+            "--exchange",
+            "binance_usdm_futures",
+            "--symbol",
+            "BTCUSDT",
+            "--action",
+            "close_long",
+            "--side",
+            "SELL",
+            "--quantity",
+            "2",
+            "--position-mode",
+            "one_way",
+            "--position-side",
+            "BOTH",
+            "--reduce-only",
+            "--mock-orderbook",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["max_orderbook_age_seconds"] == 45
+    assert payload["max_slippage_pct"] == 0.05
+    assert payload["slippage_assessment"]["status"] == "blocked"
+    assert "excessive_slippage" in payload["slippage_assessment"]["risk_flags"]
 
 
 def test_cli_rank_marks_insufficient_history(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]

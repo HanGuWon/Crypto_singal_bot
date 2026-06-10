@@ -235,8 +235,8 @@ def _build_parser() -> argparse.ArgumentParser:
     preflight.add_argument("--position-mode", choices=["one_way", "hedge"], default=None)
     preflight.add_argument("--position-side", choices=["BOTH", "LONG", "SHORT"], default=None)
     preflight.add_argument("--reduce-only", action="store_true")
-    preflight.add_argument("--max-orderbook-age-seconds", type=int, default=30)
-    preflight.add_argument("--max-slippage-pct", type=float, default=1.0)
+    preflight.add_argument("--max-orderbook-age-seconds", type=int, default=None)
+    preflight.add_argument("--max-slippage-pct", type=float, default=None)
     preflight.add_argument(
         "--mock-orderbook",
         action="store_true",
@@ -788,6 +788,20 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         dry_run=True,
         manual_approval_required=True,
     )
+    max_orderbook_age_seconds = (
+        args.max_orderbook_age_seconds
+        if args.max_orderbook_age_seconds is not None
+        else settings.exit_guard.max_orderbook_age_seconds
+    )
+    max_slippage_pct = (
+        args.max_slippage_pct
+        if args.max_slippage_pct is not None
+        else settings.exit_guard.max_slippage_pct
+    )
+    if max_orderbook_age_seconds <= 0:
+        raise ConfigError("--max-orderbook-age-seconds must be positive.")
+    if max_slippage_pct <= 0:
+        raise ConfigError("--max-slippage-pct must be positive.")
     now = utc_now()
     orderbook = (
         _mock_exit_guard_orderbook(args.exchange, args.symbol, now)
@@ -801,8 +815,8 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         intent,
         orderbook,
         observed_at_utc=now,
-        max_orderbook_age_seconds=args.max_orderbook_age_seconds,
-        max_slippage_pct=args.max_slippage_pct,
+        max_orderbook_age_seconds=max_orderbook_age_seconds,
+        max_slippage_pct=max_slippage_pct,
     )
     signal = ProtectiveExitSignal(
         signal_id=str(uuid4()),
@@ -841,6 +855,8 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
             "live_order_submitted": False,
             "exchange_order_endpoint_used": False,
             "orderbook_source": "mock" if args.mock_orderbook else "database",
+            "max_orderbook_age_seconds": max_orderbook_age_seconds,
+            "max_slippage_pct": max_slippage_pct,
             "intent": _exit_guard_intent_to_dict(intent),
             "orderbook_available": orderbook is not None,
             "slippage_assessment": _slippage_assessment_to_dict(slippage),

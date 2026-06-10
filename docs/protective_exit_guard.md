@@ -30,6 +30,8 @@ EXIT_GUARD_REQUIRE_MANUAL_APPROVAL=true
 EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST=true
 EXIT_GUARD_DISCORD_ALERTS_ENABLED=false
 EXIT_GUARD_TELEGRAM_ENABLED=false
+EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30
+EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0
 ```
 
 In this MVP, enabling private reads or live exits fails closed during config validation.
@@ -47,6 +49,11 @@ The preflight blocks when:
 - the relevant bid or ask side has no usable depth
 - visible depth cannot cover the requested quantity
 - estimated adverse slippage is above the configured threshold
+
+The default public orderbook preflight thresholds are 30 seconds of maximum snapshot age and 1.0%
+maximum estimated adverse slippage. They can be adjusted with
+`EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS` and `EXIT_GUARD_MAX_SLIPPAGE_PCT`, or overridden per CLI
+dry-run with `--max-orderbook-age-seconds` and `--max-slippage-pct`.
 
 For sell-only spot review and close-long futures review, the preflight walks public bids. For
 close-short futures review, it walks public asks. The result is an assessment with `pass` or

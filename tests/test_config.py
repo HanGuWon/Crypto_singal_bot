@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from crypto_signal_bot.config import ConfigError, ExitGuardSettings, Settings
+from crypto_signal_bot.config import ConfigError, ExitGuardSettings, Settings, load_settings
 
 
 def test_default_config_is_research_only() -> None:
@@ -29,6 +29,8 @@ def test_default_config_is_research_only() -> None:
     assert settings.exit_guard.require_symbol_whitelist is True
     assert settings.exit_guard.discord_alerts_enabled is False
     assert settings.exit_guard.telegram_enabled is False
+    assert settings.exit_guard.max_orderbook_age_seconds == 30
+    assert settings.exit_guard.max_slippage_pct == 1.0
 
 
 def test_unsafe_modes_fail_closed() -> None:
@@ -54,6 +56,8 @@ def test_exit_guard_unsafe_modes_fail_closed() -> None:
         ExitGuardSettings(require_symbol_whitelist=False),
         ExitGuardSettings(telegram_enabled=True),
         ExitGuardSettings(discord_alerts_enabled=True),
+        ExitGuardSettings(max_orderbook_age_seconds=0),
+        ExitGuardSettings(max_slippage_pct=0),
     ]
     for exit_guard in unsafe_configs:
         with pytest.raises(ConfigError):
@@ -78,3 +82,13 @@ def test_exit_guard_discord_alerts_require_webhook_url() -> None:
             discord_webhook_enabled=True,
             exit_guard=ExitGuardSettings(discord_alerts_enabled=True),
         ).validate_safety()
+
+
+def test_exit_guard_thresholds_load_from_environment(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS", "45")
+    monkeypatch.setenv("EXIT_GUARD_MAX_SLIPPAGE_PCT", "0.75")
+
+    settings = load_settings()
+
+    assert settings.exit_guard.max_orderbook_age_seconds == 45
+    assert settings.exit_guard.max_slippage_pct == 0.75
