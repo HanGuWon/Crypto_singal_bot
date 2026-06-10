@@ -41,6 +41,7 @@ def test_upgrade_from_pre_outbox_schema(tmp_path) -> None:
     assert _table_exists(db_path, "symbol_health")
     assert _table_exists(db_path, "research_runs")
     assert _table_exists(db_path, "feature_snapshots")
+    assert _table_exists(db_path, "entry_timing_snapshots")
 
 
 def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
@@ -55,6 +56,37 @@ def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
     assert _table_exists(db_path, "symbol_health")
     assert _table_exists(db_path, "research_runs")
     assert _table_exists(db_path, "feature_snapshots")
+    assert _table_exists(db_path, "entry_timing_snapshots")
+
+
+def test_entry_timing_snapshot_insert_is_idempotent(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "entry_timing.sqlite")
+    record = {
+        "id": "run:binance:TESTUSDT:5m:three_tick_bottoming",
+        "run_id": "run",
+        "created_at_utc": "2026-01-01T00:00:00+00:00",
+        "exchange": "binance",
+        "symbol": "TESTUSDT",
+        "interval": "5m",
+        "strategy": "three_tick_bottoming",
+        "status": "watch",
+        "entry_timing_score": 72.0,
+        "research_priority_score": 80.0,
+        "upside_score": 84.0,
+        "data_timestamp_utc": "2026-01-01T00:00:00+00:00",
+        "reason_codes": ["entry_timing_watch"],
+        "risk_flags": [],
+        "payload": {"research_warning": "Research watchlist only. Not financial advice. No order was placed."},
+    }
+
+    store.insert_entry_timing_snapshot(record)
+    updated = {**record, "status": "confirmed_candidate", "entry_timing_score": 88.0}
+    store.insert_entry_timing_snapshot(updated)
+
+    rows = store.get_entry_timing_snapshots("run")
+    assert len(rows) == 1
+    assert rows[0]["status"] == "confirmed_candidate"
+    assert rows[0]["entry_timing_score"] == 88.0
 
 
 def test_failed_migration_rolls_back(tmp_path) -> None:

@@ -43,6 +43,21 @@ Backtest diagnostics:
 - Output flags explicitly mark that it is not a portfolio simulator, not financial advice, and no
   order was placed.
 
+Entry timing research:
+
+- Entry timing uses closed public candles only.
+- It is a second-stage research overlay on top of the upside score.
+- `falling_knife_suppress` and `invalidated` block upside alerts.
+- Stochastic confirmation is not a standalone signal.
+- The layer does not place orders, does not read balances, and does not call private exchange APIs.
+
+Protective exit guard note:
+
+- Any future private-account or execution safety feature is out of scope for this MVP.
+- Such a feature would need a separate safety review and must not be added inside the public-data
+  screener path.
+- The current repository contains no live trading code path.
+
 Secrets:
 
 - No private exchange keys are needed.

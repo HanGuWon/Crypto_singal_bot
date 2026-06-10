@@ -41,6 +41,11 @@ from crypto_signal_bot.notifications.discord_webhook import DiscordWebhookNotifi
 from crypto_signal_bot.notifications.noop import NoopNotifier
 from crypto_signal_bot.notifications.telegram import TelegramNotifier
 from crypto_signal_bot.research import config_hash
+from crypto_signal_bot.signals.entry_timing import (
+    EntryTimingConfig,
+    EntryTimingScorer,
+    apply_entry_timing_result,
+)
 from crypto_signal_bot.signals.ranking import rank_candidates
 from crypto_signal_bot.signals.schemas import SignalCandidate
 from crypto_signal_bot.signals.scoring import ScoringEngine
@@ -90,6 +95,8 @@ def main(argv: list[str] | None = None) -> int:
             return _notifications(args, settings)
         if args.command == "runs":
             return _runs(args, settings)
+        if args.command == "strategy":
+            return _strategy(args, settings)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
@@ -120,6 +127,11 @@ def _build_parser() -> argparse.ArgumentParser:
     rank.add_argument("--notify", action="store_true")
     rank.add_argument("--mock", action="store_true", help="Seed deterministic fixture data before ranking.")
     rank.add_argument("--save-run", action="store_true", help="Persist reproducible research-run artifacts.")
+    rank.add_argument(
+        "--include-entry-timing",
+        action="store_true",
+        help="Add second-stage entry timing research fields without replacing the upside score.",
+    )
 
     backtest = sub.add_parser("backtest", help="Run a minimal leakage-safe event-study smoke test.")
     backtest.add_argument("--exchange", choices=["upbit", "binance"], required=True)
@@ -170,6 +182,22 @@ def _build_parser() -> argparse.ArgumentParser:
     runs_export = runs_sub.add_parser("export", help="Export one saved research run.")
     runs_export.add_argument("run_id")
     runs_export.add_argument("--format", choices=["json"], default="json")
+
+    strategy = sub.add_parser("strategy", help="Run research-only strategy scans.")
+    strategy_sub = strategy.add_subparsers(dest="strategy_command", required=True)
+    strategy_scan = strategy_sub.add_parser("scan", help="Scan stored candles with entry timing research logic.")
+    strategy_scan.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    strategy_scan.add_argument("--quote", default=None)
+    strategy_scan.add_argument("--base-interval", dest="base_interval", default="5m")
+    strategy_scan.add_argument("--timeframes", default=None, help="Comma-separated intervals, e.g. 5m,15m,30m.")
+    strategy_scan.add_argument(
+        "--strategy",
+        choices=["three_tick", "bottoming", "three_tick_bottoming"],
+        default="three_tick_bottoming",
+    )
+    strategy_scan.add_argument("--top", type=int, default=20)
+    strategy_scan.add_argument("--format", choices=["table", "json"], default="table")
+    strategy_scan.add_argument("--mock", action="store_true", help="Seed deterministic fixture data before scanning.")
     return parser
 
 
@@ -337,7 +365,15 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
     store = SQLiteStore(settings.database_path)
     if args.mock:
         store.upsert_candles(make_mock_candles(args.exchange, quote, args.interval, limit=160))
-    scored = _score_research_from_store(store, args.exchange, quote, args.interval, args.top, settings)
+    scored = _score_research_from_store(
+        store,
+        args.exchange,
+        quote,
+        args.interval,
+        args.top,
+        settings,
+        include_entry_timing=args.include_entry_timing,
+    )
     result = rank_candidates([item.candidate for item in scored], top=args.top)
     if args.save_run:
         _save_research_run(
@@ -425,6 +461,58 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
         "No order was placed."
     )
     return 0
+
+
+def _strategy(args: argparse.Namespace, settings: Settings) -> int:
+    if args.strategy_command == "scan":
+        return _strategy_scan(args, settings)
+    raise ConfigError(f"Unknown strategy command: {args.strategy_command}")
+
+
+def _strategy_scan(args: argparse.Namespace, settings: Settings) -> int:
+    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    intervals = _strategy_timeframes(args.base_interval, args.timeframes)
+    store = SQLiteStore(settings.database_path)
+    if args.mock:
+        for interval in intervals:
+            store.upsert_candles(make_mock_candles(args.exchange, quote, interval, limit=160))
+
+    scored: list[ScoredResearchCandidate] = []
+    for interval in intervals:
+        scored.extend(
+            _score_research_from_store(
+                store,
+                args.exchange,
+                quote,
+                interval,
+                args.top,
+                settings,
+                include_entry_timing=True,
+                entry_strategy=args.strategy,
+            )
+        )
+    candidates = _rank_by_research_priority([item.candidate for item in scored], top=args.top)
+    research_warning = "Research watchlist only. Not financial advice. No order was placed."
+    if args.format == "json":
+        _print_json(
+            {
+                "generated_at_utc": datetime.now(tz=UTC).isoformat(),
+                "strategy": args.strategy,
+                "timeframes": intervals,
+                "research_warning": research_warning,
+                "candidates": [candidate.to_dict() for candidate in candidates],
+            }
+        )
+    else:
+        _print_table(candidates)
+    return 0
+
+
+def _strategy_timeframes(base_interval: str, timeframes: str | None) -> list[str]:
+    if timeframes is None:
+        return [base_interval]
+    values = [value.strip() for value in timeframes.split(",") if value.strip()]
+    return values or [base_interval]
 
 
 def _alert_test(args: argparse.Namespace, settings: Settings) -> int:
@@ -652,6 +740,9 @@ def _score_research_from_store(
     interval: str,
     top: int,
     settings: Settings,
+    *,
+    include_entry_timing: bool = False,
+    entry_strategy: str = "three_tick_bottoming",
 ) -> list[ScoredResearchCandidate]:
     symbols = store.list_symbols(exchange, quote, interval)
     if not symbols:
@@ -706,6 +797,13 @@ def _score_research_from_store(
             health,
             orderbook_available=orderbook is not None,
         )
+        if include_entry_timing:
+            candidate = _candidate_with_entry_timing(
+                candidate,
+                candles,
+                quality,
+                strategy=entry_strategy,
+            )
         scored_candidates.append(
             ScoredResearchCandidate(
                 candidate=candidate,
@@ -716,6 +814,21 @@ def _score_research_from_store(
             )
         )
     return scored_candidates
+
+
+def _candidate_with_entry_timing(
+    candidate: SignalCandidate,
+    candles: list[Candle],
+    quality: DataQualityReport,
+    *,
+    strategy: str,
+) -> SignalCandidate:
+    result = EntryTimingScorer(EntryTimingConfig(strategy=strategy)).score(
+        candidate,
+        candles,
+        quality=quality,
+    )
+    return apply_entry_timing_result(candidate, result)
 
 
 def _assess_and_store_symbol_health(
@@ -814,6 +927,26 @@ def _unique_strings(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
 
 
+def _rank_by_research_priority(
+    candidates: list[SignalCandidate],
+    *,
+    top: int | None = None,
+) -> list[SignalCandidate]:
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: (
+            candidate.research_priority_score
+            if candidate.research_priority_score is not None
+            else candidate.score,
+            candidate.score,
+        ),
+        reverse=True,
+    )
+    if top is not None:
+        ordered = ordered[:top]
+    return [candidate.with_rank(index) for index, candidate in enumerate(ordered, start=1)]
+
+
 def _save_research_run(
     store: SQLiteStore,
     *,
@@ -881,6 +1014,33 @@ def _save_research_run(
                 "score_explanation": explanation,
             }
         )
+        if candidate.entry_timing_status != "not_evaluated":
+            strategy = candidate.entry_strategy or "entry_timing"
+            store.insert_entry_timing_snapshot(
+                {
+                    "id": (
+                        f"{run_id}:{candidate.exchange}:{candidate.symbol}:"
+                        f"{candidate.interval}:{strategy}"
+                    ),
+                    "run_id": run_id,
+                    "created_at_utc": generated_at_utc,
+                    "exchange": candidate.exchange,
+                    "symbol": candidate.symbol,
+                    "interval": candidate.interval,
+                    "strategy": strategy,
+                    "status": candidate.entry_timing_status,
+                    "entry_timing_score": candidate.entry_timing_score,
+                    "research_priority_score": candidate.research_priority_score,
+                    "upside_score": candidate.score,
+                    "data_timestamp_utc": candidate.data_timestamp_utc,
+                    "reason_codes": candidate.entry_reason_codes,
+                    "risk_flags": candidate.entry_risk_flags,
+                    "payload": {
+                        "candidate": candidate.to_dict(),
+                        "research_warning": research_warning,
+                    },
+                }
+            )
 
 
 def _runs(args: argparse.Namespace, settings: Settings) -> int:
@@ -897,6 +1057,7 @@ def _runs(args: argparse.Namespace, settings: Settings) -> int:
             {
                 "run": _research_run_row_to_dict(run),
                 "snapshot_count": len(store.get_feature_snapshots(args.run_id)),
+                "entry_timing_snapshot_count": len(store.get_entry_timing_snapshots(args.run_id)),
             }
         )
         return 0
@@ -912,6 +1073,10 @@ def _runs(args: argparse.Namespace, settings: Settings) -> int:
                 "feature_snapshots": [
                     _feature_snapshot_row_to_dict(row)
                     for row in store.get_feature_snapshots(args.run_id)
+                ],
+                "entry_timing_snapshots": [
+                    _entry_timing_snapshot_row_to_dict(row)
+                    for row in store.get_entry_timing_snapshots(args.run_id)
                 ],
             }
         )
@@ -1054,6 +1219,26 @@ def _feature_snapshot_row_to_dict(row: Any) -> dict[str, object]:
     }
 
 
+def _entry_timing_snapshot_row_to_dict(row: Any) -> dict[str, object]:
+    return {
+        "id": row["id"],
+        "run_id": row["run_id"],
+        "created_at_utc": row["created_at_utc"],
+        "exchange": row["exchange"],
+        "symbol": row["symbol"],
+        "interval": row["interval"],
+        "strategy": row["strategy"],
+        "status": row["status"],
+        "entry_timing_score": row["entry_timing_score"],
+        "research_priority_score": row["research_priority_score"],
+        "upside_score": row["upside_score"],
+        "data_timestamp_utc": row["data_timestamp_utc"],
+        "reason_codes": json.loads(str(row["reason_codes_json"])),
+        "risk_flags": json.loads(str(row["risk_flags_json"])),
+        "payload": json.loads(str(row["payload_json"])),
+    }
+
+
 def _channel_state_row_to_dict(row: Any) -> dict[str, object]:
     return {
         "channel": row["channel"],
@@ -1110,28 +1295,57 @@ def _exchange_client(exchange: str, settings: Settings) -> PublicMarketDataClien
 
 def _print_table(candidates: list[SignalCandidate]) -> None:
     print("Research watchlist only. Not financial advice. No order was placed.")
+    include_entry = any(candidate.entry_timing_status != "not_evaluated" for candidate in candidates)
     if Console is not None and Table is not None:
         table = Table(title="Crypto Signal Research Watchlist")
-        for column in ["Rank", "Exchange", "Symbol", "Score", "Confidence", "Price", "Drivers", "Risks"]:
+        columns = ["Rank", "Exchange", "Symbol", "Score", "Confidence", "Price"]
+        if include_entry:
+            columns.extend(["Entry", "Priority"])
+        columns.extend(["Drivers", "Risks"])
+        for column in columns:
             table.add_column(column)
         for candidate in candidates:
-            table.add_row(
+            row = [
                 str(candidate.rank or ""),
                 candidate.exchange,
                 candidate.symbol,
                 f"{candidate.score:.1f}",
                 candidate.confidence,
                 f"{candidate.current_price:.8g}",
+            ]
+            if include_entry:
+                row.extend(
+                    [
+                        candidate.entry_timing_status,
+                        (
+                            ""
+                            if candidate.research_priority_score is None
+                            else f"{candidate.research_priority_score:.1f}"
+                        ),
+                    ]
+                )
+            row.extend(
+                [
                 ", ".join(candidate.drivers[:3]),
                 ", ".join(candidate.risk_flags[:3]) or "none",
+                ]
             )
+            table.add_row(*row)
         Console().print(table)
         return
     for candidate in candidates:
+        entry_part = ""
+        if include_entry:
+            priority = (
+                ""
+                if candidate.research_priority_score is None
+                else f" priority={candidate.research_priority_score:5.1f}"
+            )
+            entry_part = f" entry={candidate.entry_timing_status}{priority}"
         print(
             f"{candidate.rank:>2} {candidate.exchange:<7} {candidate.symbol:<14} "
             f"score={candidate.score:5.1f} confidence={candidate.confidence:<6} "
-            f"price={candidate.current_price:.8g} drivers={','.join(candidate.drivers[:3])} "
+            f"price={candidate.current_price:.8g}{entry_part} drivers={','.join(candidate.drivers[:3])} "
             f"risks={','.join(candidate.risk_flags[:3]) or 'none'}"
         )
 

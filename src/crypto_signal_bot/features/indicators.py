@@ -137,3 +137,51 @@ def score_from_centered_value(value: float, scale: float, cap: float = 3.0) -> f
 
 def clip_score(value: float) -> float:
     return max(0.0, min(100.0, float(value)))
+
+
+def stochastic_kd(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    *,
+    k_period: int = 14,
+    k_smoothing: int = 3,
+    d_period: int = 3,
+) -> tuple[list[float], list[float]]:
+    limit = min(len(highs), len(lows), len(closes))
+    if limit < k_period or k_period <= 0 or k_smoothing <= 0 or d_period <= 0:
+        return [], []
+    raw_k: list[float] = []
+    for index in range(k_period - 1, limit):
+        high = max(highs[index - k_period + 1 : index + 1])
+        low = min(lows[index - k_period + 1 : index + 1])
+        if high <= low:
+            raw_k.append(50.0)
+        else:
+            raw_k.append(100 * (closes[index] - low) / (high - low))
+    smooth_k = _moving_average(raw_k, k_smoothing)
+    smooth_d = _moving_average(smooth_k, d_period)
+    return smooth_k, smooth_d
+
+
+def stochastic_cross_up(k_values: list[float], d_values: list[float]) -> bool:
+    if len(k_values) < 2 or len(d_values) < 2:
+        return False
+    return k_values[-2] <= d_values[-2] and k_values[-1] > d_values[-1]
+
+
+def stochastic_cross_down(k_values: list[float], d_values: list[float]) -> bool:
+    if len(k_values) < 2 or len(d_values) < 2:
+        return False
+    return k_values[-2] >= d_values[-2] and k_values[-1] < d_values[-1]
+
+
+def _moving_average(values: list[float], period: int) -> list[float]:
+    if period <= 0:
+        return []
+    if len(values) < period:
+        return []
+    return [
+        sum(values[index - period + 1 : index + 1]) / period
+        for index in range(period - 1, len(values))
+    ]

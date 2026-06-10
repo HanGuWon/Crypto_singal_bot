@@ -25,6 +25,14 @@ class SignalCandidate:
     quarantine_reason: str | None = None
     history_bars_available: int = 0
     benchmark_available: bool = True
+    entry_timing_status: str = "not_evaluated"
+    entry_timing_score: float | None = None
+    research_priority_score: float | None = None
+    entry_strategy: str | None = None
+    entry_strategy_timeframe: str | None = None
+    entry_reason_codes: list[str] = field(default_factory=list)
+    entry_risk_flags: list[str] = field(default_factory=list)
+    entry_invalidation_condition: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +55,14 @@ class SignalCandidate:
             "quarantine_reason": self.quarantine_reason,
             "history_bars_available": self.history_bars_available,
             "benchmark_available": self.benchmark_available,
+            "entry_timing_status": self.entry_timing_status,
+            "entry_timing_score": self.entry_timing_score,
+            "research_priority_score": self.research_priority_score,
+            "entry_strategy": self.entry_strategy,
+            "entry_strategy_timeframe": self.entry_strategy_timeframe,
+            "entry_reason_codes": self.entry_reason_codes,
+            "entry_risk_flags": self.entry_risk_flags,
+            "entry_invalidation_condition": self.entry_invalidation_condition,
         }
 
     def with_rank(self, rank: int) -> SignalCandidate:

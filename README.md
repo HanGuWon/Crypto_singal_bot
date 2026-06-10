@@ -40,6 +40,8 @@ python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interv
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format table
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --save-run
+python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --include-entry-timing
+python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m,30m --strategy three_tick --top 20 --format json --mock
 ```
 
 Use public live collection with conservative caps:
@@ -104,9 +106,33 @@ python -m crypto_signal_bot.cli runs export RUN_ID --format json
 ```
 
 Saved runs include a commit SHA, safe config hash, data window, candidate count, feature snapshots,
-component contributions, penalties, risk flags, data-quality notes, symbol-health notes, and the
-research-only warning. Exports are research artifacts only, not financial advice or performance
-claims, and they do not include Telegram tokens, Discord webhook URLs, or exchange secrets.
+component contributions, penalties, risk flags, data-quality notes, symbol-health notes, optional
+entry timing snapshots, and the research-only warning. Exports are research artifacts only, not
+financial advice or performance claims, and they do not include Telegram tokens, Discord webhook
+URLs, or exchange secrets.
+
+## Entry Timing Research Layer
+
+`rank --include-entry-timing` keeps the original upside score intact and adds a second-stage,
+closed-candle research view. This layer reports `entry_timing_status`, `entry_timing_score`,
+`research_priority_score`, strategy metadata, reason codes, and entry-specific risk flags.
+
+Supported statuses are:
+
+- `not_ready`
+- `forming`
+- `watch`
+- `confirmed_candidate`
+- `flow_broken_reset`
+- `falling_knife_suppress`
+- `invalidated`
+
+The stochastic oscillator is used only as confirmation or invalidation evidence. It is not a
+standalone signal. `falling_knife_suppress` and `invalidated` suppress upside alerts. The strategy
+scan CLI ranks by `research_priority_score`, but it remains a research watchlist, not a trade
+instruction.
+
+See `docs/strategy_three_tick_bottoming.md` for details.
 
 ## Output Format
 
@@ -125,6 +151,7 @@ Each candidate includes:
 - source run id
 - closed-candle and data-quality status
 - symbol health status, quarantine reason, history bars available, and benchmark availability
+- optional entry timing status, score, research priority, reasons, and risk flags
 
 All human-readable outputs include:
 
@@ -192,3 +219,5 @@ development.
   still a production follow-up.
 - Scoring is interpretable and deterministic but not a profit prediction.
 - Cross-exchange normalization is not implemented.
+- Entry timing logic is an MVP research overlay. It is not connected to orders, private APIs, or
+  protective execution features.

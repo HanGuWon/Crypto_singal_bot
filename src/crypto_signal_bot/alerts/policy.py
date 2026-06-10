@@ -295,6 +295,8 @@ class AlertPolicy:
 
 
 def _eligible_for_upside_alert(candidate: SignalCandidate) -> bool:
+    if candidate.entry_timing_status in {"falling_knife_suppress", "invalidated"}:
+        return False
     return (
         candidate.is_closed_candle_signal
         and candidate.data_quality_status == "pass"

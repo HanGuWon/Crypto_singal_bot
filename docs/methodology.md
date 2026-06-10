@@ -11,6 +11,7 @@ Public market data
   -> closed-candle feature snapshot
   -> composite scoring
   -> ranked research watchlist
+  -> optional entry timing research overlay
   -> optional alert policy
   -> optional notification adapter
 ```
@@ -27,3 +28,13 @@ Feature groups:
 
 Signals are generated only from closed candles. Backtest entries must occur after the signal candle
 close, using the next candle open in the smoke engine.
+
+Entry timing research:
+
+- The original upside score remains the first-stage candidate score.
+- Entry timing adds `entry_timing_score` and `research_priority_score` for review workflows.
+- Three-tick and bottoming evidence describe whether a setup is not ready, forming, on watch,
+  confirmed as a research candidate, reset, suppressed, or invalidated.
+- Stochastic is confirmation/invalidation evidence only, never a standalone signal.
+- Data-quality failures, incomplete candles, stale data, low liquidity, wide spreads, quarantined
+  symbols, `falling_knife_suppress`, and `invalidated` prevent upside alerts.

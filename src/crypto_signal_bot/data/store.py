@@ -211,6 +211,32 @@ CREATE INDEX IF NOT EXISTS idx_feature_snapshots_run
 ON feature_snapshots(run_id, exchange, symbol);
 """
 
+ENTRY_TIMING_SCHEMA = """
+CREATE TABLE IF NOT EXISTS entry_timing_snapshots (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  created_at_utc TEXT NOT NULL,
+  exchange TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  interval TEXT NOT NULL,
+  strategy TEXT NOT NULL,
+  status TEXT NOT NULL,
+  entry_timing_score REAL,
+  research_priority_score REAL,
+  upside_score REAL NOT NULL,
+  data_timestamp_utc TEXT NOT NULL,
+  reason_codes_json TEXT NOT NULL,
+  risk_flags_json TEXT NOT NULL,
+  payload_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_entry_timing_snapshots_run
+ON entry_timing_snapshots(run_id, exchange, symbol, interval);
+
+CREATE INDEX IF NOT EXISTS idx_entry_timing_snapshots_status
+ON entry_timing_snapshots(status, research_priority_score);
+"""
+
 SCHEMA_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
   id INTEGER PRIMARY KEY,
@@ -229,6 +255,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(2, "audit_indexes", _split_sql_script(INDEX_SCHEMA)),
     Migration(3, "symbol_health", _split_sql_script(SYMBOL_HEALTH_SCHEMA)),
     Migration(4, "research_runs", _split_sql_script(RESEARCH_RUN_SCHEMA)),
+    Migration(5, "entry_timing_snapshots", _split_sql_script(ENTRY_TIMING_SCHEMA)),
 )
 
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -373,6 +400,23 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "risk_flags_json",
         "score_explanation_json",
     },
+    "entry_timing_snapshots": {
+        "id",
+        "run_id",
+        "created_at_utc",
+        "exchange",
+        "symbol",
+        "interval",
+        "strategy",
+        "status",
+        "entry_timing_score",
+        "research_priority_score",
+        "upside_score",
+        "data_timestamp_utc",
+        "reason_codes_json",
+        "risk_flags_json",
+        "payload_json",
+    },
 }
 
 REQUIRED_INDEXES = {
@@ -383,6 +427,8 @@ REQUIRED_INDEXES = {
     "idx_symbol_health_status",
     "idx_research_runs_created",
     "idx_feature_snapshots_run",
+    "idx_entry_timing_snapshots_run",
+    "idx_entry_timing_snapshots_status",
 }
 
 
@@ -741,6 +787,47 @@ class SQLiteStore:
                     json.dumps(record["risk_flags"]),
                     json.dumps(record["score_explanation"]),
                 ),
+            )
+
+    def insert_entry_timing_snapshot(self, record: dict[str, object]) -> None:
+        self.init_schema()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO entry_timing_snapshots VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["id"],
+                    record["run_id"],
+                    record["created_at_utc"],
+                    record["exchange"],
+                    record["symbol"],
+                    record["interval"],
+                    record["strategy"],
+                    record["status"],
+                    record["entry_timing_score"],
+                    record["research_priority_score"],
+                    record["upside_score"],
+                    record["data_timestamp_utc"],
+                    json.dumps(record["reason_codes"]),
+                    json.dumps(record["risk_flags"]),
+                    json.dumps(record["payload"]),
+                ),
+            )
+
+    def get_entry_timing_snapshots(self, run_id: str) -> list[sqlite3.Row]:
+        self.init_schema()
+        with self.connect() as conn:
+            return list(
+                conn.execute(
+                    """
+                    SELECT * FROM entry_timing_snapshots
+                    WHERE run_id=?
+                    ORDER BY research_priority_score DESC, symbol
+                    """,
+                    (run_id,),
+                )
             )
 
     def list_research_runs(self, limit: int = 20) -> list[sqlite3.Row]:

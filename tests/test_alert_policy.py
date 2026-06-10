@@ -39,3 +39,13 @@ def test_missing_benchmark_suppresses_upside_alert() -> None:
     )
 
     assert AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70}) == []
+
+
+def test_entry_timing_blocking_status_suppresses_upside_alert() -> None:
+    candidate = make_candidate(
+        confidence="medium",
+        entry_timing_status="falling_knife_suppress",
+        entry_risk_flags=["falling_knife_suppress"],
+    )
+
+    assert AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70}) == []
