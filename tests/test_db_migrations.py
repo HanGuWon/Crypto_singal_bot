@@ -61,6 +61,22 @@ def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
     assert _table_exists(db_path, "manual_approval_requests")
 
 
+def test_upgrade_from_manual_approval_schema_without_binding_hash(tmp_path) -> None:
+    db_path = tmp_path / "pre_manual_approval_binding.sqlite"
+    store = SQLiteStore(db_path)
+
+    first_applied = store.run_migrations(MIGRATIONS[:6])
+    assert first_applied == [migration.id for migration in MIGRATIONS[:6]]
+    assert not _column_exists(db_path, "manual_approval_requests", "binding_hash")
+
+    applied = store.run_migrations()
+
+    assert applied == [7]
+    store.validate_schema()
+    assert _column_exists(db_path, "manual_approval_requests", "binding_hash")
+    assert _index_exists(db_path, "idx_manual_approval_binding")
+
+
 def test_entry_timing_snapshot_insert_is_idempotent(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "entry_timing.sqlite")
     record = {
@@ -224,5 +240,20 @@ def _table_exists(path, table: str) -> bool:  # type: ignore[no-untyped-def]
         row = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
             (table,),
+        ).fetchone()
+    return row is not None
+
+
+def _column_exists(path, table: str, column: str) -> bool:  # type: ignore[no-untyped-def]
+    with sqlite3.connect(path) as conn:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return column in {str(row[1]) for row in rows}
+
+
+def _index_exists(path, index: str) -> bool:  # type: ignore[no-untyped-def]
+    with sqlite3.connect(path) as conn:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
+            (index,),
         ).fetchone()
     return row is not None

@@ -261,6 +261,13 @@ CREATE INDEX IF NOT EXISTS idx_manual_approval_status_expiry
 ON manual_approval_requests(status, expires_at_utc);
 """
 
+MANUAL_APPROVAL_BINDING_SCHEMA = """
+ALTER TABLE manual_approval_requests ADD COLUMN binding_hash TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_manual_approval_binding
+ON manual_approval_requests(binding_hash);
+"""
+
 SCHEMA_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
   id INTEGER PRIMARY KEY,
@@ -281,6 +288,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(4, "research_runs", _split_sql_script(RESEARCH_RUN_SCHEMA)),
     Migration(5, "entry_timing_snapshots", _split_sql_script(ENTRY_TIMING_SCHEMA)),
     Migration(6, "manual_approval_requests", _split_sql_script(MANUAL_APPROVAL_SCHEMA)),
+    Migration(7, "manual_approval_binding_hash", _split_sql_script(MANUAL_APPROVAL_BINDING_SCHEMA)),
 )
 
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -456,6 +464,7 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "position_mode",
         "position_side",
         "source_alert_event_id",
+        "binding_hash",
         "request_payload_json",
         "decided_at_utc",
         "decision_note",
@@ -473,6 +482,7 @@ REQUIRED_INDEXES = {
     "idx_entry_timing_snapshots_run",
     "idx_entry_timing_snapshots_status",
     "idx_manual_approval_status_expiry",
+    "idx_manual_approval_binding",
 }
 
 
@@ -1216,8 +1226,26 @@ class SQLiteStore:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO manual_approval_requests VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                INSERT INTO manual_approval_requests (
+                    id,
+                    created_at_utc,
+                    expires_at_utc,
+                    status,
+                    exchange,
+                    symbol,
+                    interval,
+                    action,
+                    side,
+                    quantity,
+                    position_mode,
+                    position_side,
+                    source_alert_event_id,
+                    binding_hash,
+                    request_payload_json,
+                    decided_at_utc,
+                    decision_note
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
                 """,
                 (
                     payload["id"],
@@ -1233,6 +1261,7 @@ class SQLiteStore:
                     payload["position_mode"],
                     payload["position_side"],
                     payload["source_alert_event_id"],
+                    payload["binding_hash"],
                     json.dumps(payload["request_payload"]),
                 ),
             )

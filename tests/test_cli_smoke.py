@@ -342,21 +342,27 @@ def test_cli_exit_guard_manual_approval_request_is_audit_only(tmp_path, monkeypa
 
     payload = json.loads(capsys.readouterr().out)
     request_id = payload["manual_approval_request"]["id"]
+    binding_hash = payload["manual_approval_request"]["binding_hash"]
     assert payload["saved_event"] is True
     assert payload["manual_approval_request"]["status"] == "pending"
     assert payload["manual_approval_request"]["source_alert_event_id"] == payload["saved_alert_event_id"]
+    assert isinstance(binding_hash, str)
+    assert len(binding_hash) == 64
     assert payload["live_order_submitted"] is False
 
     assert main(["exit-guard", "approvals", "list", "--status", "pending"]) == 0
     list_payload = json.loads(capsys.readouterr().out)
     assert list_payload["count"] == 1
     assert list_payload["approval_requests"][0]["id"] == request_id
+    assert list_payload["approval_requests"][0]["binding_hash"] == binding_hash
 
     assert main(["exit-guard", "approvals", "show", request_id]) == 0
     show_payload = json.loads(capsys.readouterr().out)
     request = show_payload["approval_request"]
     assert request["status"] == "pending"
     assert request["source_alert_event_id"] == payload["saved_alert_event_id"]
+    assert request["binding_hash"] == binding_hash
+    assert request["request_payload"]["binding_hash"] == binding_hash
     assert request["request_payload"]["intent"]["action"] == "close_short"
     assert "No order was placed" in show_payload["research_warning"]
 
@@ -367,6 +373,7 @@ def test_cli_exit_guard_manual_approval_request_is_audit_only(tmp_path, monkeypa
     approved_payload = json.loads(capsys.readouterr().out)
     assert approved_payload["approval_request"]["status"] == "approved"
     assert approved_payload["approval_request"]["decision_note"] == "reviewed"
+    assert approved_payload["approval_request"]["binding_hash"] == binding_hash
     assert approved_payload["live_execution_allowed"] is False
     assert "No order was placed" in approved_payload["research_warning"]
 

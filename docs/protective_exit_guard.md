@@ -93,9 +93,11 @@ matching delivery audit rows, so dry-run notification behavior can be inspected 
 secrets or sending an order.
 
 Adding `--request-approval` creates a manual approval request bound to the dry-run event and the
-validated risk-reducing intent. Approval requests expire, can be approved or rejected only with
-`--confirm`, and remain audit records only. They do not enable private reads, live orders, sell
-orders, close orders, or any exchange endpoint.
+validated risk-reducing intent. Each request stores a deterministic binding hash over the source
+event, exchange, symbol, action, side, quantity, position mode, and position side so later audit
+inspection can verify the approval scope. Approval requests expire, can be approved or rejected
+only with `--confirm`, and remain audit records only. They do not enable private reads, live
+orders, sell orders, close orders, or any exchange endpoint.
 
 ## Upbit Spot Sell-Only Shape
 

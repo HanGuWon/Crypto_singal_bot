@@ -6,6 +6,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -963,6 +964,7 @@ def _create_manual_approval_request(
 ) -> dict[str, object]:
     expires_at = created_at + timedelta(minutes=ttl_minutes)
     request_id = f"exit-approval-{uuid4()}"
+    binding_hash = _manual_approval_binding_hash(event=event, intent=intent)
     request_payload = {
         "research_warning": (
             "Manual approval request is for dry-run audit only. Not financial advice. "
@@ -970,6 +972,7 @@ def _create_manual_approval_request(
         ),
         "approval_scope": "protective_exit_guard_dry_run",
         "source_alert_event_id": event.alert_event_id,
+        "binding_hash": binding_hash,
         "intent": _exit_guard_intent_to_dict(intent),
     }
     record = {
@@ -986,6 +989,7 @@ def _create_manual_approval_request(
         "position_mode": intent.position_mode,
         "position_side": intent.position_side,
         "source_alert_event_id": event.alert_event_id,
+        "binding_hash": binding_hash,
         "request_payload": request_payload,
     }
     store.insert_manual_approval_request(record)
@@ -994,8 +998,25 @@ def _create_manual_approval_request(
         "status": "pending",
         "expires_at_utc": expires_at.isoformat(),
         "source_alert_event_id": event.alert_event_id,
+        "binding_hash": binding_hash,
         "approval_scope": "protective_exit_guard_dry_run",
     }
+
+
+def _manual_approval_binding_hash(*, event: Any, intent: RiskReducingOrderIntent) -> str:
+    binding_payload = {
+        "exchange": intent.exchange,
+        "symbol": intent.symbol,
+        "interval": event.interval,
+        "action": intent.action,
+        "side": intent.side,
+        "quantity": intent.quantity,
+        "position_mode": intent.position_mode,
+        "position_side": intent.position_side,
+        "source_alert_event_id": event.alert_event_id,
+    }
+    canonical = json.dumps(binding_payload, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _exit_guard_events(args: argparse.Namespace, settings: Settings) -> int:
@@ -1128,6 +1149,7 @@ def _manual_approval_row_to_dict(row: Any, *, include_payload: bool = True) -> d
         "position_mode": row["position_mode"],
         "position_side": row["position_side"],
         "source_alert_event_id": row["source_alert_event_id"],
+        "binding_hash": row["binding_hash"],
         "decided_at_utc": row["decided_at_utc"],
         "decision_note": row["decision_note"],
     }
