@@ -43,6 +43,74 @@ def test_cli_notify_skipped_when_disabled(tmp_path, monkeypatch, capsys) -> None
     assert "notifications skipped because they are disabled" in capsys.readouterr().out
 
 
+def test_cli_exit_guard_preflight_mock_outputs_research_event(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "exit-guard",
+            "preflight",
+            "--exchange",
+            "binance_usdm_futures",
+            "--symbol",
+            "BTCUSDT",
+            "--interval",
+            "5m",
+            "--action",
+            "close_long",
+            "--side",
+            "SELL",
+            "--quantity",
+            "2",
+            "--position-mode",
+            "one_way",
+            "--position-side",
+            "BOTH",
+            "--reduce-only",
+            "--mock-orderbook",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dry_run"] is True
+    assert payload["private_api_used"] is False
+    assert payload["live_order_submitted"] is False
+    assert payload["exchange_order_endpoint_used"] is False
+    assert payload["orderbook_source"] == "mock"
+    assert payload["slippage_assessment"]["status"] == "pass"
+    assert payload["alert_event"]["event_type"] == "PROTECTIVE_EXIT_WATCH"
+    assert "No order was placed" in payload["research_warning"]
+    assert "buy now" not in json.dumps(payload).lower()
+
+
+def test_cli_exit_guard_notify_skips_when_disabled(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "exit-guard",
+            "preflight",
+            "--exchange",
+            "upbit_spot",
+            "--symbol",
+            "KRW-BTC",
+            "--action",
+            "sell_only",
+            "--side",
+            "ask",
+            "--quantity",
+            "1",
+            "--mock-orderbook",
+            "--notify",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["notification_note"].startswith("notifications skipped")
+    assert payload["notification_results"][0]["status"] == "skipped"
+    assert payload["intent"]["dry_run"] is True
+
+
 def test_cli_rank_marks_insufficient_history(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("MIN_HISTORY_BARS", "120")

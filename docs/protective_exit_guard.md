@@ -63,6 +63,16 @@ Protective exit alert events include dry-run/manual-approval drivers and use eve
 `PROTECTIVE_EXIT_WATCH` and `PROTECTIVE_EXIT_BLOCKED`. A blocked public orderbook preflight is a
 warning event, not an execution instruction.
 
+CLI dry-run example:
+
+```bash
+python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook
+```
+
+Adding `--notify` does not send anything unless global notifications, Discord webhook notifications,
+and `EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are all enabled. Telegram remains disallowed for this
+module.
+
 ## Upbit Spot Sell-Only Shape
 
 A future Upbit protective action may only reduce an already-held spot asset. The only allowed

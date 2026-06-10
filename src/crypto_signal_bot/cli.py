@@ -34,6 +34,13 @@ from crypto_signal_bot.data.symbol_health import assess_symbol_health
 from crypto_signal_bot.exchanges.base import PublicMarketDataClient
 from crypto_signal_bot.exchanges.binance import BinancePublicClient
 from crypto_signal_bot.exchanges.upbit import UpbitPublicClient
+from crypto_signal_bot.exit_guard.alerts import build_protective_exit_alert_event
+from crypto_signal_bot.exit_guard.models import (
+    OrderBookSlippageAssessment,
+    ProtectiveExitSignal,
+    RiskReducingOrderIntent,
+    assess_orderbook_slippage,
+)
 from crypto_signal_bot.features.feature_builder import FeatureSnapshot, build_feature_snapshot
 from crypto_signal_bot.logging_config import configure_logging
 from crypto_signal_bot.notifications.base import Notifier
@@ -98,6 +105,8 @@ def main(argv: list[str] | None = None) -> int:
             return _runs(args, settings)
         if args.command == "strategy":
             return _strategy(args, settings)
+        if args.command == "exit-guard":
+            return _exit_guard(args, settings)
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
@@ -210,6 +219,30 @@ def _build_parser() -> argparse.ArgumentParser:
     strategy_event_study.add_argument("--min-history-bars", type=int, default=None)
     strategy_event_study.add_argument("--format", choices=["table", "json"], default="json")
     strategy_event_study.add_argument("--mock", action="store_true", help="Seed deterministic fixture data first.")
+
+    exit_guard = sub.add_parser("exit-guard", help="Inspect disabled-by-default protective exit guard research flows.")
+    exit_guard_sub = exit_guard.add_subparsers(dest="exit_guard_command", required=True)
+    preflight = exit_guard_sub.add_parser(
+        "preflight",
+        help="Build a dry-run protective exit research event from public orderbook data.",
+    )
+    preflight.add_argument("--exchange", choices=["upbit_spot", "binance_usdm_futures"], required=True)
+    preflight.add_argument("--symbol", required=True)
+    preflight.add_argument("--interval", default="5m")
+    preflight.add_argument("--action", choices=["sell_only", "close_long", "close_short"], required=True)
+    preflight.add_argument("--side", required=True)
+    preflight.add_argument("--quantity", type=float, required=True)
+    preflight.add_argument("--position-mode", choices=["one_way", "hedge"], default=None)
+    preflight.add_argument("--position-side", choices=["BOTH", "LONG", "SHORT"], default=None)
+    preflight.add_argument("--reduce-only", action="store_true")
+    preflight.add_argument("--max-orderbook-age-seconds", type=int, default=30)
+    preflight.add_argument("--max-slippage-pct", type=float, default=1.0)
+    preflight.add_argument(
+        "--mock-orderbook",
+        action="store_true",
+        help="Use a deterministic local public-orderbook fixture instead of the database.",
+    )
+    preflight.add_argument("--notify", action="store_true")
     return parser
 
 
@@ -370,6 +403,56 @@ def _mock_orderbooks(candles: list[Candle], symbols: list[str]) -> list[OrderBoo
             )
         )
     return orderbooks
+
+
+def _mock_exit_guard_orderbook(exchange: str, symbol: str, event_time_utc: datetime) -> OrderBook:
+    store_exchange = _store_exchange_for_exit_guard(exchange)
+    mid = 100.0
+    return OrderBook(
+        exchange=store_exchange,
+        symbol=symbol,
+        event_time_utc=event_time_utc,
+        bids=[PriceLevel(mid, 1.0), PriceLevel(mid * 0.998, 5.0)],
+        asks=[PriceLevel(mid * 1.001, 1.0), PriceLevel(mid * 1.003, 5.0)],
+    )
+
+
+def _store_exchange_for_exit_guard(exchange: str) -> str:
+    if exchange == "upbit_spot":
+        return "upbit"
+    if exchange == "binance_usdm_futures":
+        return "binance"
+    raise ConfigError(f"Unsupported exit guard exchange: {exchange}")
+
+
+def _exit_guard_intent_to_dict(intent: RiskReducingOrderIntent) -> dict[str, object]:
+    return {
+        "exchange": intent.exchange,
+        "symbol": intent.symbol,
+        "action": intent.action,
+        "side": intent.side,
+        "quantity": intent.quantity,
+        "position_mode": intent.position_mode,
+        "position_side": intent.position_side,
+        "reduce_only": intent.reduce_only,
+        "dry_run": intent.dry_run,
+        "manual_approval_required": intent.manual_approval_required,
+        "opens_new_position": intent.opens_new_position,
+    }
+
+
+def _slippage_assessment_to_dict(assessment: OrderBookSlippageAssessment) -> dict[str, object]:
+    return {
+        "status": assessment.status,
+        "side": assessment.side,
+        "requested_quantity": assessment.requested_quantity,
+        "filled_quantity": assessment.filled_quantity,
+        "reference_price": assessment.reference_price,
+        "average_price": assessment.average_price,
+        "estimated_slippage_pct": assessment.estimated_slippage_pct,
+        "depth_exhausted": assessment.depth_exhausted,
+        "risk_flags": assessment.risk_flags,
+    }
 
 
 def _rank(args: argparse.Namespace, settings: Settings) -> int:
@@ -683,6 +766,93 @@ def _alert_test(args: argparse.Namespace, settings: Settings) -> int:
     dispatcher = NotificationDispatcher(True, _configured_notifiers(settings, channel=args.channel))
     results = dispatcher.dispatch(events)
     print(json.dumps([result.to_safe_dict() for result in results], indent=2))
+    return 0
+
+
+def _exit_guard(args: argparse.Namespace, settings: Settings) -> int:
+    if args.exit_guard_command == "preflight":
+        return _exit_guard_preflight(args, settings)
+    raise ConfigError(f"Unknown exit-guard command: {args.exit_guard_command}")
+
+
+def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
+    intent = RiskReducingOrderIntent(
+        exchange=args.exchange,
+        symbol=args.symbol,
+        action=args.action,
+        side=args.side,
+        quantity=args.quantity,
+        position_mode=args.position_mode,
+        position_side=args.position_side,
+        reduce_only=True if args.reduce_only else None,
+        dry_run=True,
+        manual_approval_required=True,
+    )
+    now = utc_now()
+    orderbook = (
+        _mock_exit_guard_orderbook(args.exchange, args.symbol, now)
+        if args.mock_orderbook
+        else SQLiteStore(settings.database_path).fetch_latest_orderbook(
+            _store_exchange_for_exit_guard(args.exchange),
+            args.symbol,
+        )
+    )
+    slippage = assess_orderbook_slippage(
+        intent,
+        orderbook,
+        observed_at_utc=now,
+        max_orderbook_age_seconds=args.max_orderbook_age_seconds,
+        max_slippage_pct=args.max_slippage_pct,
+    )
+    signal = ProtectiveExitSignal(
+        signal_id=str(uuid4()),
+        created_at_utc=now,
+        exchange=args.exchange,
+        symbol=args.symbol,
+        interval=args.interval,
+        state="BLOCKED" if not slippage.passed else "WATCHING",
+        exit_score=75.0 if not slippage.passed else 35.0,
+        drivers=["public_orderbook_preflight", f"action:{intent.action}"],
+        risk_flags=slippage.risk_flags,
+        is_closed_candle_signal=True,
+        data_quality_status="pass",
+    )
+    event = build_protective_exit_alert_event(signal, intent=intent, slippage=slippage, now=now)
+    notification_results: list[dict[str, object]] = []
+    notification_note = "not_requested"
+    if args.notify:
+        if settings.notifications_enabled and settings.exit_guard.discord_alerts_enabled:
+            dispatcher = NotificationDispatcher(
+                True,
+                _configured_notifiers(settings, channel="discord"),
+            )
+            notification_results = [result.to_safe_dict() for result in dispatcher.dispatch([event])]
+            notification_note = "dispatch_attempted_discord_only"
+        else:
+            notification_results = [result.to_safe_dict() for result in NotificationDispatcher(False).dispatch([event])]
+            notification_note = (
+                "notifications skipped because they are disabled or exit guard Discord alerts are disabled"
+            )
+    _print_json(
+        {
+            "dry_run": True,
+            "manual_approval_required": True,
+            "private_api_used": False,
+            "live_order_submitted": False,
+            "exchange_order_endpoint_used": False,
+            "orderbook_source": "mock" if args.mock_orderbook else "database",
+            "intent": _exit_guard_intent_to_dict(intent),
+            "orderbook_available": orderbook is not None,
+            "slippage_assessment": _slippage_assessment_to_dict(slippage),
+            "alert_event": event.to_dict(),
+            "notification_note": notification_note,
+            "notification_results": notification_results,
+            "research_warning": (
+                "Protective exit guard dry-run research only. Not financial advice. "
+                "No new position was opened. No order was placed."
+            ),
+        }
+    )
     return 0
 
 
