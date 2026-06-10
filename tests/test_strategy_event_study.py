@@ -27,6 +27,12 @@ def test_strategy_event_study_has_diagnostic_flags_and_horizons() -> None:
     assert result["signal_counts"]["confirmed_entry_timing"] >= 1
     assert result["variant_summaries"]["confirmed_entry_timing"]["1"]["trades"] >= 1
     assert result["cost_model"]["applied_to_variant_summaries"] is True
+    turnover = result["turnover_diagnostics"]
+    exposure = result["exposure_diagnostics"]
+    assert turnover["variant_event_counts"]["confirmed_entry_timing"] >= 1
+    assert turnover["not_order_turnover"] is True
+    assert exposure["event_overlap_only"] is True
+    assert exposure["not_account_exposure"] is True
 
 
 def test_strategy_event_study_reports_cost_sensitivity() -> None:

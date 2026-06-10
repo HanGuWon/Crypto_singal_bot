@@ -49,6 +49,7 @@ def diagnostic_event_study(
     symbol_conditions = symbol_conditions or {}
     base_assumptions = BacktestAssumptions()
     records = _event_records(candles_by_symbol, signal_indices_by_symbol, base_assumptions, symbol_conditions)
+    event_exposure = _event_exposure_diagnostics(records, base_assumptions)
     benchmark_records = _benchmark_records(
         candles_by_symbol,
         records,
@@ -73,7 +74,9 @@ def diagnostic_event_study(
             benchmark_symbols=_benchmark_symbol_set(benchmark_symbol, benchmark_symbols),
             assumptions=BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0),
         ),
-        "event_exposure_diagnostics": _event_exposure_diagnostics(records, base_assumptions),
+        "event_exposure_diagnostics": event_exposure,
+        "turnover_diagnostics": _turnover_diagnostics(event_exposure),
+        "exposure_diagnostics": _exposure_diagnostics(event_exposure),
         "stress_diagnostics": _stress_diagnostics(
             candles_by_symbol,
             records,
@@ -555,6 +558,29 @@ def _event_exposure_diagnostics(
         "average_overlapping_event_windows": sum(overlap_counts) / len(overlap_counts),
         "diagnostic_turnover_events_per_signal_time": len(records) / unique_signal_times,
         "event_overlap_only": True,
+        "not_portfolio_exposure": True,
+    }
+
+
+def _turnover_diagnostics(event_exposure: dict[str, object]) -> dict[str, object]:
+    return {
+        "events": event_exposure["events"],
+        "unique_signal_times": event_exposure["unique_signal_times"],
+        "diagnostic_turnover_events_per_signal_time": event_exposure[
+            "diagnostic_turnover_events_per_signal_time"
+        ],
+        "event_turnover_only": True,
+        "not_order_turnover": True,
+    }
+
+
+def _exposure_diagnostics(event_exposure: dict[str, object]) -> dict[str, object]:
+    return {
+        "holding_bars": event_exposure["holding_bars"],
+        "max_overlapping_event_windows": event_exposure["max_overlapping_event_windows"],
+        "average_overlapping_event_windows": event_exposure["average_overlapping_event_windows"],
+        "event_overlap_only": True,
+        "not_account_exposure": True,
         "not_portfolio_exposure": True,
     }
 

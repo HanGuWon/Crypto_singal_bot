@@ -46,7 +46,8 @@ tail loss. These are event-study diagnostics, not a portfolio execution model.
 Baseline diagnostics compare the same event windows against BTC/ETH benchmark sets, universe
 median/equal-weight returns, deterministic random-symbol selection, and a point-in-time
 liquidity-ranked symbol. Event turnover and exposure fields describe signal-window overlap only;
-they are not account exposure, allocation, or order execution.
+top-level turnover/exposure diagnostics repeat those fields explicitly and are not account
+exposure, allocation, or order execution.
 
 Walk-forward diagnostics sort event-study records by signal timestamp, fit only on expanding prior
 windows, and summarize later evaluation windows. They are audit aids for temporal robustness, not

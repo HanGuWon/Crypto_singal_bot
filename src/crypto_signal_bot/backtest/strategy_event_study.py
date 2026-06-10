@@ -54,6 +54,7 @@ def strategy_event_study(
         variant: _variant_horizon_summaries(candles_by_symbol, signal_records[variant], cfg)
         for variant in STRATEGY_VARIANTS
     }
+    turnover_exposure = _strategy_turnover_exposure_diagnostics(signal_records, cfg)
     return {
         **_strategy_diagnostic_flags(),
         "variants": list(STRATEGY_VARIANTS),
@@ -64,6 +65,8 @@ def strategy_event_study(
             for variant in STRATEGY_VARIANTS
         },
         "variant_summaries": summaries,
+        "turnover_diagnostics": turnover_exposure["turnover_diagnostics"],
+        "exposure_diagnostics": turnover_exposure["exposure_diagnostics"],
         "cost_sensitivity": _cost_sensitivity(candles_by_symbol, signal_records, cfg),
         "benchmark_diagnostics": _benchmark_diagnostics(
             candles_by_symbol,
@@ -408,6 +411,70 @@ def _strategy_baseline_diagnostics(
             "They are not execution models."
         ),
     }
+
+
+def _strategy_turnover_exposure_diagnostics(
+    signal_records: dict[str, list[dict[str, Any]]],
+    config: StrategyEventStudyConfig,
+) -> dict[str, dict[str, object]]:
+    all_records = [record for records in signal_records.values() for record in records]
+    variant_event_counts = {
+        variant: len(records)
+        for variant, records in signal_records.items()
+    }
+    if not all_records:
+        return {
+            "turnover_diagnostics": {
+                "events": 0,
+                "unique_signal_times": 0,
+                "diagnostic_turnover_events_per_signal_time": 0.0,
+                "variant_event_counts": variant_event_counts,
+                "event_turnover_only": True,
+                "not_order_turnover": True,
+            },
+            "exposure_diagnostics": {
+                "holding_horizons": list(config.horizons),
+                "max_overlapping_event_windows": 0,
+                "average_overlapping_event_windows": 0.0,
+                "event_overlap_only": True,
+                "not_account_exposure": True,
+                "not_portfolio_exposure": True,
+            },
+        }
+
+    unique_signal_times = {str(record["signal_time_utc"]) for record in all_records}
+    overlap_counts = _strategy_overlap_counts(all_records, max(config.horizons))
+    return {
+        "turnover_diagnostics": {
+            "events": len(all_records),
+            "unique_signal_times": len(unique_signal_times),
+            "diagnostic_turnover_events_per_signal_time": len(all_records) / len(unique_signal_times),
+            "variant_event_counts": variant_event_counts,
+            "event_turnover_only": True,
+            "not_order_turnover": True,
+        },
+        "exposure_diagnostics": {
+            "holding_horizons": list(config.horizons),
+            "max_overlapping_event_windows": max(overlap_counts),
+            "average_overlapping_event_windows": sum(overlap_counts) / len(overlap_counts),
+            "event_overlap_only": True,
+            "not_account_exposure": True,
+            "not_portfolio_exposure": True,
+        },
+    }
+
+
+def _strategy_overlap_counts(records: list[dict[str, Any]], holding_bars: int) -> list[int]:
+    min_entry = min(int(record["entry_index"]) for record in records)
+    max_exit = max(int(record["entry_index"]) + holding_bars for record in records)
+    return [
+        sum(
+            1
+            for record in records
+            if int(record["entry_index"]) <= index <= int(record["entry_index"]) + holding_bars
+        )
+        for index in range(min_entry, max_exit + 1)
+    ]
 
 
 def _baseline_horizon_summaries(

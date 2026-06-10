@@ -128,6 +128,13 @@ def test_event_exposure_diagnostics_are_event_overlap_only() -> None:
     assert exposure["max_overlapping_event_windows"] >= 3
     assert exposure["event_overlap_only"] is True
     assert exposure["not_portfolio_exposure"] is True
+    turnover = metrics["turnover_diagnostics"]
+    explicit_exposure = metrics["exposure_diagnostics"]
+    assert turnover["events"] == 6
+    assert turnover["diagnostic_turnover_events_per_signal_time"] == 3.0
+    assert turnover["not_order_turnover"] is True
+    assert explicit_exposure["max_overlapping_event_windows"] == exposure["max_overlapping_event_windows"]
+    assert explicit_exposure["not_account_exposure"] is True
 
 
 def test_walk_forward_diagnostics_use_prior_time_windows_only() -> None:
