@@ -5,7 +5,7 @@ import json
 import subprocess
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -445,6 +445,10 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
         )
         for symbol in symbols
     }
+    candles_by_symbol = _filter_candles_by_date_range(candles_by_symbol, args.from_date, args.to_date)
+    if not any(candles_by_symbol.values()):
+        print("No candles found for the requested backtest date range.")
+        return 1
     signal_indices_by_symbol = {
         symbol: list(range(50, max(50, len(candles) - 5), 20))
         for symbol, candles in candles_by_symbol.items()
@@ -526,6 +530,44 @@ def _strategy_timeframes(base_interval: str, timeframes: str | None) -> list[str
         return [base_interval]
     values = [value.strip() for value in timeframes.split(",") if value.strip()]
     return values or [base_interval]
+
+
+def _filter_candles_by_date_range(
+    candles_by_symbol: dict[str, list[Candle]],
+    from_date: str | None,
+    to_date: str | None,
+) -> dict[str, list[Candle]]:
+    start = _parse_backtest_date_bound(from_date, end_bound=False)
+    end = _parse_backtest_date_bound(to_date, end_bound=True)
+    if start is not None and end is not None and start >= end:
+        raise ConfigError("--from must be earlier than --to.")
+    if start is None and end is None:
+        return candles_by_symbol
+    return {
+        symbol: [
+            candle
+            for candle in candles
+            if (start is None or candle.open_time_utc >= start)
+            and (end is None or candle.open_time_utc < end)
+        ]
+        for symbol, candles in candles_by_symbol.items()
+    }
+
+
+def _parse_backtest_date_bound(value: str | None, *, end_bound: bool) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ConfigError("Backtest dates must use ISO format, for example YYYY-MM-DD.") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    else:
+        parsed = parsed.astimezone(UTC)
+    if "T" not in value and end_bound:
+        parsed += timedelta(days=1)
+    return parsed
 
 
 def _strategy_event_study(args: argparse.Namespace, settings: Settings) -> int:

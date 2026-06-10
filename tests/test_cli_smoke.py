@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 
-from crypto_signal_bot.cli import main
+from crypto_signal_bot.cli import _filter_candles_by_date_range, main
+from crypto_signal_bot.data.collector import make_mock_candles
 from crypto_signal_bot.data.store import SQLiteStore
 
 
@@ -168,6 +170,73 @@ def test_cli_strategy_event_study_rejects_invalid_horizons(tmp_path, monkeypatch
     ) == 2
 
     assert "horizons must contain only positive integers" in capsys.readouterr().err
+
+
+def test_backtest_date_range_filters_candles_by_utc_open_time() -> None:
+    candles = [
+        candle
+        for candle in make_mock_candles("binance", "USDT", "5m", limit=20)
+        if candle.symbol == "BTCUSDT"
+    ]
+    start = candles[5].open_time_utc
+    end = candles[10].open_time_utc
+
+    filtered = _filter_candles_by_date_range(
+        {"BTCUSDT": candles},
+        start.isoformat(),
+        end.isoformat(),
+    )
+
+    assert [candle.open_time_utc for candle in filtered["BTCUSDT"]] == [
+        candle.open_time_utc
+        for candle in candles[5:10]
+    ]
+
+
+def test_backtest_date_only_to_bound_is_inclusive_for_that_utc_day() -> None:
+    candles = [
+        candle
+        for candle in make_mock_candles("binance", "USDT", "5m", limit=3)
+        if candle.symbol == "BTCUSDT"
+    ]
+    target_day = datetime(2026, 1, 1, tzinfo=UTC)
+    shifted = [
+        candle.__class__(
+            **{
+                **candle.__dict__,
+                "open_time_utc": target_day + timedelta(minutes=index * 5),
+                "close_time_utc": target_day + timedelta(minutes=(index + 1) * 5) - timedelta(milliseconds=1),
+            }
+        )
+        for index, candle in enumerate(candles)
+    ]
+
+    filtered = _filter_candles_by_date_range({"BTCUSDT": shifted}, "2026-01-01", "2026-01-01")
+
+    assert len(filtered["BTCUSDT"]) == 3
+
+
+def test_cli_backtest_rejects_inverted_date_range(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "backtest",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--from",
+            "2026-01-02",
+            "--to",
+            "2026-01-01",
+            "--mock",
+        ]
+    ) == 2
+
+    assert "--from must be earlier than --to" in capsys.readouterr().err
 
 
 def test_saved_run_includes_entry_timing_snapshots(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]

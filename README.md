@@ -63,6 +63,7 @@ Backtest smoke check:
 
 ```bash
 python -m crypto_signal_bot.cli backtest --exchange binance --quote USDT --interval 15m --mock
+python -m crypto_signal_bot.cli backtest --exchange binance --quote USDT --interval 15m --from 2026-01-01 --to 2026-01-31 --mock
 ```
 
 Backtest output is marked with `diagnostic_event_study_only=true`,
@@ -73,6 +74,8 @@ as hit rate, average win/loss, gain/loss factor, Sharpe, Sortino, max drawdown, 
 not a trading recommendation, not financial advice, and no order is placed. Diagnostic comparisons
 include BTC/universe context plus deterministic random-symbol and liquidity-ranked baselines using
 the same point-in-time windows.
+`--from` and `--to` are applied as UTC candle-open bounds; date-only `--to` includes that full UTC
+calendar day.
 
 The entry timing strategy event-study utilities are diagnostic-only and keep the same closed-candle
 signal / next-candle-open entry rule. They compare strategy variants, forward horizons, benchmark
