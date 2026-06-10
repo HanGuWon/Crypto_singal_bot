@@ -204,6 +204,8 @@ are not blocked by earlier watchlist alerts. Terminal Telegram/Discord authoriza
 failures are quarantined in local channel state until configuration is fixed.
 Upside alerts are suppressed for quarantined symbols, stale or incomplete candle data,
 low-liquidity candidates, and candidates missing a usable benchmark.
+Digest support is a disabled-by-default policy placeholder that can build a research-only preview
+from top candidates and major score changes; it does not dispatch messages by itself.
 
 Telegram placeholders:
 

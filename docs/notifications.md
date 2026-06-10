@@ -43,6 +43,9 @@ Dedupe, cooldown, and hysteresis:
   `notification_channel_state` until manual reset/configuration repair.
 - The CLI creates `notification_outbox` rows before provider sends, then claims and completes those
   rows during dispatch.
+- Digest support is a separate disabled-by-default policy path. `DigestPolicy` can build a
+  research-only digest preview with top candidates and major score changes, but it does not dispatch
+  provider messages and does not affect instant alert policy.
 
 Telegram:
 
