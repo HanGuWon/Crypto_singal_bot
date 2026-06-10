@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from crypto_signal_bot.alerts.schemas import AlertEvent
-from crypto_signal_bot.data.models import Candle, SymbolHealth
+from crypto_signal_bot.data.models import Candle, OrderBook, PriceLevel, SymbolHealth, Ticker
 
 
 class SchemaValidationError(RuntimeError):
@@ -248,6 +248,25 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "trade_count",
         "is_closed",
     },
+    "tickers": {
+        "exchange",
+        "symbol",
+        "event_time_utc",
+        "price",
+        "quote_volume_24h",
+        "base_volume_24h",
+        "price_change_pct_24h",
+        "payload_json",
+    },
+    "orderbooks": {
+        "exchange",
+        "symbol",
+        "event_time_utc",
+        "best_bid",
+        "best_ask",
+        "spread_bps",
+        "payload_json",
+    },
     "alert_events": {
         "id",
         "created_at_utc",
@@ -483,6 +502,78 @@ class SQLiteStore:
             )
         return len(rows)
 
+    def upsert_tickers(self, tickers: Iterable[Ticker]) -> int:
+        rows = [
+            (
+                ticker.exchange,
+                ticker.symbol,
+                ticker.event_time_utc.isoformat(),
+                ticker.price,
+                ticker.quote_volume_24h,
+                ticker.base_volume_24h,
+                ticker.price_change_pct_24h,
+                json.dumps(
+                    {
+                        "exchange": ticker.exchange,
+                        "symbol": ticker.symbol,
+                        "price": ticker.price,
+                        "quote_volume_24h": ticker.quote_volume_24h,
+                        "base_volume_24h": ticker.base_volume_24h,
+                        "price_change_pct_24h": ticker.price_change_pct_24h,
+                        "event_time_utc": ticker.event_time_utc.isoformat(),
+                    }
+                ),
+            )
+            for ticker in tickers
+        ]
+        if not rows:
+            return 0
+        self.init_schema()
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO tickers VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(exchange, symbol, event_time_utc) DO UPDATE SET
+                  price=excluded.price,
+                  quote_volume_24h=excluded.quote_volume_24h,
+                  base_volume_24h=excluded.base_volume_24h,
+                  price_change_pct_24h=excluded.price_change_pct_24h,
+                  payload_json=excluded.payload_json
+                """,
+                rows,
+            )
+        return len(rows)
+
+    def upsert_orderbooks(self, orderbooks: Iterable[OrderBook]) -> int:
+        rows = [
+            (
+                orderbook.exchange,
+                orderbook.symbol,
+                orderbook.event_time_utc.isoformat(),
+                orderbook.best_bid,
+                orderbook.best_ask,
+                orderbook.spread_bps,
+                json.dumps(_orderbook_payload(orderbook)),
+            )
+            for orderbook in orderbooks
+        ]
+        if not rows:
+            return 0
+        self.init_schema()
+        with self.connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO orderbooks VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(exchange, symbol, event_time_utc) DO UPDATE SET
+                  best_bid=excluded.best_bid,
+                  best_ask=excluded.best_ask,
+                  spread_bps=excluded.spread_bps,
+                  payload_json=excluded.payload_json
+                """,
+                rows,
+            )
+        return len(rows)
+
     def fetch_candles(
         self, exchange: str, symbol: str, interval: str, limit: int | None = None
     ) -> list[Candle]:
@@ -501,6 +592,38 @@ class SQLiteStore:
         if limit is not None:
             rows = list(reversed(rows))
         return [_row_to_candle(row) for row in rows]
+
+    def fetch_latest_ticker(self, exchange: str, symbol: str) -> Ticker | None:
+        self.init_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM tickers
+                WHERE exchange=? AND symbol=?
+                ORDER BY event_time_utc DESC
+                LIMIT 1
+                """,
+                (exchange, symbol),
+            ).fetchone()
+        if row is None:
+            return None
+        return _row_to_ticker(row)
+
+    def fetch_latest_orderbook(self, exchange: str, symbol: str) -> OrderBook | None:
+        self.init_schema()
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM orderbooks
+                WHERE exchange=? AND symbol=?
+                ORDER BY event_time_utc DESC
+                LIMIT 1
+                """,
+                (exchange, symbol),
+            ).fetchone()
+        if row is None:
+            return None
+        return _row_to_orderbook(row)
 
     def list_symbols(self, exchange: str, quote: str, interval: str) -> list[str]:
         self.init_schema()
@@ -1067,6 +1190,62 @@ def _row_to_candle(row: sqlite3.Row) -> Candle:
         trade_count=None if row["trade_count"] is None else int(row["trade_count"]),
         is_closed=bool(row["is_closed"]),
     )
+
+
+def _row_to_ticker(row: sqlite3.Row) -> Ticker:
+    return Ticker(
+        exchange=str(row["exchange"]),
+        symbol=str(row["symbol"]),
+        price=float(row["price"]),
+        quote_volume_24h=(
+            None if row["quote_volume_24h"] is None else float(row["quote_volume_24h"])
+        ),
+        base_volume_24h=(
+            None if row["base_volume_24h"] is None else float(row["base_volume_24h"])
+        ),
+        price_change_pct_24h=(
+            None if row["price_change_pct_24h"] is None else float(row["price_change_pct_24h"])
+        ),
+        event_time_utc=datetime.fromisoformat(str(row["event_time_utc"])),
+    )
+
+
+def _row_to_orderbook(row: sqlite3.Row) -> OrderBook:
+    payload = json.loads(str(row["payload_json"]))
+    bids = [
+        PriceLevel(float(level["price"]), float(level["quantity"]))
+        for level in payload.get("bids", [])
+    ]
+    asks = [
+        PriceLevel(float(level["price"]), float(level["quantity"]))
+        for level in payload.get("asks", [])
+    ]
+    return OrderBook(
+        exchange=str(row["exchange"]),
+        symbol=str(row["symbol"]),
+        event_time_utc=datetime.fromisoformat(str(row["event_time_utc"])),
+        bids=bids,
+        asks=asks,
+    )
+
+
+def _orderbook_payload(orderbook: OrderBook) -> dict[str, object]:
+    return {
+        "exchange": orderbook.exchange,
+        "symbol": orderbook.symbol,
+        "event_time_utc": orderbook.event_time_utc.isoformat(),
+        "best_bid": orderbook.best_bid,
+        "best_ask": orderbook.best_ask,
+        "spread_bps": orderbook.spread_bps,
+        "bids": [
+            {"price": level.price, "quantity": level.quantity}
+            for level in orderbook.bids
+        ],
+        "asks": [
+            {"price": level.price, "quantity": level.quantity}
+            for level in orderbook.asks
+        ],
+    }
 
 
 def _row_to_symbol_health(row: sqlite3.Row) -> SymbolHealth:

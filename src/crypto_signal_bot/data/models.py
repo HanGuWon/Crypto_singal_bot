@@ -76,6 +76,9 @@ class Ticker:
     price_change_pct_24h: float | None
     event_time_utc: datetime
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "event_time_utc", ensure_utc(self.event_time_utc))
+
 
 @dataclass(frozen=True)
 class PriceLevel:
@@ -94,6 +97,9 @@ class OrderBook:
     event_time_utc: datetime
     bids: list[PriceLevel] = field(default_factory=list)
     asks: list[PriceLevel] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "event_time_utc", ensure_utc(self.event_time_utc))
 
     @property
     def best_bid(self) -> float | None:

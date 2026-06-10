@@ -21,5 +21,14 @@ Binance:
 - 24h ticker: `/api/v3/ticker/24hr`
 - Depth/orderbook: `/api/v3/depth`
 
+Collection policy:
+
+- Candle collection remains the primary polling path.
+- Public 24h ticker snapshots are stored during collection unless `--skip-tickers` is used.
+- Public shallow orderbook snapshots are opt-in via `--with-orderbook` and capped by
+  `--max-orderbook-symbols`.
+- Ranking uses the latest stored orderbook snapshot when present; otherwise the candidate carries an
+  `orderbook_unavailable` research risk flag.
+
 Binance request weights are tracked from `X-MBX-USED-WEIGHT-1M`. HTTP 429 is retried with bounded
 backoff and `Retry-After` when present. HTTP 418 fails the client request.

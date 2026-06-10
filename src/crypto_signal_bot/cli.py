@@ -18,7 +18,15 @@ from crypto_signal_bot.alerts.rate_limit import SQLiteNotificationRateLimiter
 from crypto_signal_bot.alerts.state import SQLiteAlertStateStore
 from crypto_signal_bot.config import ConfigError, Settings, load_settings
 from crypto_signal_bot.data.collector import make_mock_candles
-from crypto_signal_bot.data.models import Candle, DataQualityReport, SymbolHealth
+from crypto_signal_bot.data.models import (
+    Candle,
+    DataQualityReport,
+    OrderBook,
+    PriceLevel,
+    SymbolHealth,
+    Ticker,
+    utc_now,
+)
 from crypto_signal_bot.data.quality import assess_candles
 from crypto_signal_bot.data.store import SQLiteStore
 from crypto_signal_bot.data.symbol_health import assess_symbol_health
@@ -98,6 +106,9 @@ def _build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--interval", default="5m")
     collect.add_argument("--limit", type=int, default=200)
     collect.add_argument("--max-symbols", type=int, default=None)
+    collect.add_argument("--skip-tickers", action="store_true", help="Skip public 24h ticker snapshots.")
+    collect.add_argument("--with-orderbook", action="store_true", help="Fetch shallow public orderbook snapshots.")
+    collect.add_argument("--max-orderbook-symbols", type=int, default=None)
     collect.add_argument("--mock", action="store_true", help="Use deterministic local fixture data.")
 
     rank = sub.add_parser("rank", help="Rank stored public-market candidates.")
@@ -168,6 +179,12 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
     if args.mock:
         mocked = make_mock_candles(args.exchange, quote, args.interval, limit=args.limit)
         count = store.upsert_candles(mocked)
+        symbols = sorted({candle.symbol for candle in mocked})
+        ticker_count = 0 if args.skip_tickers else store.upsert_tickers(_mock_tickers(mocked))
+        orderbook_count = 0
+        if args.with_orderbook:
+            max_orderbooks = args.max_orderbook_symbols or settings.max_orderbook_symbols_per_collect
+            orderbook_count = store.upsert_orderbooks(_mock_orderbooks(mocked, symbols[:max_orderbooks]))
         for symbol in sorted({candle.symbol for candle in mocked}):
             candles = [candle for candle in mocked if candle.symbol == symbol]
             quality = assess_candles(
@@ -184,7 +201,10 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
                 quality,
                 settings,
             )
-        print(f"Stored {count} mocked public candles for {args.exchange} {quote}.")
+        print(
+            f"Stored {count} mocked public candles, {ticker_count} tickers, "
+            f"and {orderbook_count} orderbooks for {args.exchange} {quote}."
+        )
         print("Research-only data collection completed. No order was placed.")
         return 0
 
@@ -192,6 +212,7 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
     markets = client.get_markets(quote)
     max_symbols = args.max_symbols or settings.max_symbols_per_collect
     selected = markets[:max_symbols]
+    selected_trading = [market for market in selected if market.status == "TRADING"]
     stored = 0
     for market in selected:
         if market.status != "TRADING":
@@ -223,11 +244,92 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
             settings,
             market_status=market.status,
         )
+    ticker_count = 0
+    if not args.skip_tickers and selected_trading:
+        ticker_count = store.upsert_tickers(_fetch_tickers(client, args.exchange, selected_trading))
+    orderbook_count = 0
+    if args.with_orderbook and selected_trading:
+        max_orderbooks = args.max_orderbook_symbols or settings.max_orderbook_symbols_per_collect
+        orderbook_count = store.upsert_orderbooks(
+            _fetch_orderbooks(
+                client,
+                args.exchange,
+                selected_trading[:max_orderbooks],
+                depth_limit=settings.orderbook_depth_limit,
+            )
+        )
     print(
-        f"Stored {stored} public candles for {len(selected)} {args.exchange} {quote} symbols. "
+        f"Stored {stored} public candles, {ticker_count} tickers, and {orderbook_count} orderbooks "
+        f"for {len(selected)} {args.exchange} {quote} symbols. "
         "No private API was used."
     )
     return 0
+
+
+def _fetch_tickers(client: Any, exchange: str, markets: list[Any]) -> list[Ticker]:
+    if exchange == "upbit":
+        return list(client.get_ticker([market.raw_symbol for market in markets]))
+    tickers: list[Ticker] = []
+    for market in markets:
+        tickers.extend(client.get_ticker(market.raw_symbol))
+    return tickers
+
+
+def _fetch_orderbooks(
+    client: Any,
+    exchange: str,
+    markets: list[Any],
+    *,
+    depth_limit: int,
+) -> list[OrderBook]:
+    symbols = [market.raw_symbol for market in markets]
+    if exchange == "upbit":
+        return list(client.get_orderbook(symbols))
+    return [client.get_orderbook(symbol, limit=depth_limit) for symbol in symbols]
+
+
+def _mock_tickers(candles: list[Candle]) -> list[Ticker]:
+    tickers: list[Ticker] = []
+    for symbol in sorted({candle.symbol for candle in candles}):
+        symbol_candles = [candle for candle in candles if candle.symbol == symbol]
+        latest = symbol_candles[-1]
+        quote_24h = sum(candle.quote_volume or 0.0 for candle in symbol_candles[-288:])
+        base_24h = sum(candle.base_volume or 0.0 for candle in symbol_candles[-288:])
+        first = symbol_candles[-288].close if len(symbol_candles) >= 288 else symbol_candles[0].close
+        change_pct = 100 * (latest.close / first - 1) if first > 0 else 0.0
+        tickers.append(
+            Ticker(
+                exchange=latest.exchange,
+                symbol=symbol,
+                price=latest.close,
+                quote_volume_24h=quote_24h,
+                base_volume_24h=base_24h,
+                price_change_pct_24h=change_pct,
+                event_time_utc=latest.close_time_utc,
+            )
+        )
+    return tickers
+
+
+def _mock_orderbooks(candles: list[Candle], symbols: list[str]) -> list[OrderBook]:
+    orderbooks: list[OrderBook] = []
+    for symbol in symbols:
+        symbol_candles = [candle for candle in candles if candle.symbol == symbol]
+        if not symbol_candles:
+            continue
+        latest = symbol_candles[-1]
+        mid = latest.close
+        spread = mid * 0.001
+        orderbooks.append(
+            OrderBook(
+                exchange=latest.exchange,
+                symbol=symbol,
+                event_time_utc=utc_now(),
+                bids=[PriceLevel(mid - spread / 2, 10.0)],
+                asks=[PriceLevel(mid + spread / 2, 10.0)],
+            )
+        )
+    return orderbooks
 
 
 def _rank(args: argparse.Namespace, settings: Settings) -> int:
@@ -591,13 +693,19 @@ def _score_research_from_store(
         )
         if len(candles) < 25:
             continue
+        orderbook = store.fetch_latest_orderbook(exchange, symbol)
         snapshot = build_feature_snapshot(
             candles,
             quality=quality,
             benchmark_candles=benchmark_candles if benchmark_candles else None,
+            orderbook=orderbook,
         )
         candidate = engine.score(snapshot, source_run_id=run_id)
-        candidate = _candidate_with_symbol_health(candidate, health)
+        candidate = _candidate_with_symbol_health(
+            candidate,
+            health,
+            orderbook_available=orderbook is not None,
+        )
         scored_candidates.append(
             ScoredResearchCandidate(
                 candidate=candidate,
@@ -657,10 +765,18 @@ def _benchmark_available(
 def _candidate_with_symbol_health(
     candidate: SignalCandidate,
     health: SymbolHealth,
+    *,
+    orderbook_available: bool,
 ) -> SignalCandidate:
     data = candidate.to_dict()
     risk_flags = _unique_strings(candidate.risk_flags)
     confidence = candidate.confidence
+    if not orderbook_available and "wide_spread" not in risk_flags:
+        # Spread is unavailable when no orderbook snapshot was collected; keep this visible.
+        if "orderbook_unavailable" not in risk_flags:
+            risk_flags.append("orderbook_unavailable")
+            if confidence == "high":
+                confidence = "medium"
     if health.status == "quarantined":
         risk_flags = _unique_strings([
             *risk_flags,

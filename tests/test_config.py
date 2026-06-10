@@ -18,6 +18,8 @@ def test_default_config_is_research_only() -> None:
     assert settings.alert_safety_per_symbol_max_per_hour == 3
     assert settings.min_history_bars == 80
     assert settings.symbol_quarantine_minutes == 120
+    assert settings.max_orderbook_symbols_per_collect == 10
+    assert settings.orderbook_depth_limit == 20
 
 
 def test_unsafe_modes_fail_closed() -> None:

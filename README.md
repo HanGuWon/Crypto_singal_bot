@@ -47,7 +47,12 @@ Use public live collection with conservative caps:
 ```bash
 python -m crypto_signal_bot.cli collect --exchange upbit --quote KRW --interval 5m --limit 200 --max-symbols 20
 python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interval 5m --limit 200 --max-symbols 20
+python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interval 5m --limit 200 --max-symbols 20 --with-orderbook --max-orderbook-symbols 10
 ```
+
+Collection stores closed public candles and 24h ticker snapshots by default. Shallow orderbook
+snapshots are opt-in with `--with-orderbook` and capped by `--max-orderbook-symbols` to avoid
+expensive polling loops.
 
 Backtest smoke check:
 
