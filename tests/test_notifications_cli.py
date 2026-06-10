@@ -189,6 +189,33 @@ def test_outbox_drain_records_undeliverable_rows(
     assert rows[no_notifier_id]["retry_count"] == 1
 
 
+def test_outbox_drain_requires_positive_max_and_respects_limit(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "notifications.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    store = SQLiteStore(db_path)
+    first = make_alert(alert_event_id="first-event")
+    second = make_alert(alert_event_id="second-event")
+    for event in [first, second]:
+        store.insert_alert_event(event)
+        store.insert_notification_outbox(
+            alert_event_id=event.alert_event_id,
+            channel="telegram",
+            destination_hash=destination_hash("telegram", "chat-1:token"),
+            created_at_utc=datetime.now(tz=UTC).isoformat(),
+        )
+
+    assert main(["notifications", "outbox", "drain", "--max", "0", "--dry-run"]) == 2
+    assert "must be positive" in capsys.readouterr().err
+
+    assert main(["notifications", "outbox", "drain", "--max", "1", "--dry-run"]) == 0
+    payload = capsys.readouterr().out
+    assert payload.count("alert_event_id") == 1
+
+
 def test_previous_alert_policy_inputs_skip_current_saved_run(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "notifications.sqlite")
     _insert_research_run(store, "previous-run", "2026-01-01T00:00:00+00:00")

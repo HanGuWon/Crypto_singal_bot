@@ -1996,6 +1996,8 @@ def _notifications_outbox(args: argparse.Namespace, settings: Settings, store: S
 
 
 def _notifications_outbox_drain(args: argparse.Namespace, settings: Settings, store: SQLiteStore) -> int:
+    if args.max_rows <= 0:
+        raise ConfigError("notifications outbox drain --max must be positive.")
     rows = _drainable_outbox_rows(store, limit=args.max_rows)
     if args.dry_run:
         _print_json(
