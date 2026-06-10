@@ -105,7 +105,9 @@ flag still does nothing unless global notifications, Discord webhook notificatio
 `EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are explicitly configured. Default preflight thresholds
 are `EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30` and `EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0`; both can be
 overridden per dry-run command. `--save-event` persists the dry-run `AlertEvent` to the local audit
-table without sending a notification or placing an order.
+table without sending a notification or placing an order. When `--notify` is used, the generated
+`AlertEvent` is also persisted for auditability and each delivery attempt, failure, or disabled
+skip is recorded in `notification_deliveries`.
 
 Database maintenance:
 

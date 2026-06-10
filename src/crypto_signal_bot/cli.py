@@ -846,20 +846,46 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         data_quality_status="pass",
     )
     event = build_protective_exit_alert_event(signal, intent=intent, slippage=slippage, now=now)
-    if args.save_event:
+    event_saved = bool(args.save_event or args.notify)
+    if event_saved:
         store.insert_alert_event(event)
     notification_results: list[dict[str, object]] = []
+    delivery_audit_count = 0
     notification_note = "not_requested"
     if args.notify:
         if settings.notifications_enabled and settings.exit_guard.discord_alerts_enabled:
+            notifiers = _configured_notifiers(settings, channel="discord")
+            for notifier in notifiers:
+                channel = getattr(notifier, "channel", "unknown")
+                destination = notifier_destination(notifier)
+                store.insert_notification_outbox(
+                    alert_event_id=event.alert_event_id,
+                    channel=channel,
+                    destination_hash=destination_hash(channel, destination),
+                    created_at_utc=now.isoformat(),
+                )
             dispatcher = NotificationDispatcher(
                 True,
-                _configured_notifiers(settings, channel="discord"),
+                notifiers,
+                channel_state_store=SQLiteNotificationChannelStateStore(store),
+                outbox_store=store,
             )
-            notification_results = [result.to_safe_dict() for result in dispatcher.dispatch([event])]
+            delivery_pairs = dispatcher.dispatch_with_events([event])
+            for pair_event, result in delivery_pairs:
+                store.insert_notification_delivery(
+                    delivery_record(result, pair_event.alert_event_id, attempted_at=now)
+                )
+            delivery_audit_count = len(delivery_pairs)
+            notification_results = [result.to_safe_dict() for _, result in delivery_pairs]
             notification_note = "dispatch_attempted_discord_only"
         else:
-            notification_results = [result.to_safe_dict() for result in NotificationDispatcher(False).dispatch([event])]
+            delivery_pairs = NotificationDispatcher(False).dispatch_with_events([event])
+            for pair_event, result in delivery_pairs:
+                store.insert_notification_delivery(
+                    delivery_record(result, pair_event.alert_event_id, attempted_at=now)
+                )
+            delivery_audit_count = len(delivery_pairs)
+            notification_results = [result.to_safe_dict() for _, result in delivery_pairs]
             notification_note = (
                 "notifications skipped because they are disabled or exit guard Discord alerts are disabled"
             )
@@ -877,10 +903,12 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
             "orderbook_available": orderbook is not None,
             "slippage_assessment": _slippage_assessment_to_dict(slippage),
             "alert_event": event.to_dict(),
-            "saved_event": bool(args.save_event),
-            "saved_alert_event_id": event.alert_event_id if args.save_event else None,
+            "saved_event": event_saved,
+            "saved_alert_event_id": event.alert_event_id if event_saved else None,
             "notification_note": notification_note,
             "notification_results": notification_results,
+            "delivery_audit_recorded": delivery_audit_count > 0,
+            "delivery_audit_count": delivery_audit_count,
             "research_warning": (
                 "Protective exit guard dry-run research only. Not financial advice. "
                 "No new position was opened. No order was placed."

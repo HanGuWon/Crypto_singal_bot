@@ -86,7 +86,8 @@ def test_cli_exit_guard_preflight_mock_outputs_research_event(tmp_path, monkeypa
 
 
 def test_cli_exit_guard_notify_skips_when_disabled(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
-    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
 
     assert main(
         [
@@ -110,7 +111,21 @@ def test_cli_exit_guard_notify_skips_when_disabled(tmp_path, monkeypatch, capsys
     payload = json.loads(capsys.readouterr().out)
     assert payload["notification_note"].startswith("notifications skipped")
     assert payload["notification_results"][0]["status"] == "skipped"
+    assert payload["saved_event"] is True
+    assert payload["delivery_audit_recorded"] is True
+    assert payload["delivery_audit_count"] == 1
     assert payload["intent"]["dry_run"] is True
+
+    store = SQLiteStore(db_path)
+    with store.connect() as conn:
+        alert_rows = conn.execute("SELECT * FROM alert_events").fetchall()
+        delivery_rows = conn.execute("SELECT * FROM notification_deliveries").fetchall()
+    assert len(alert_rows) == 1
+    assert len(delivery_rows) == 1
+    assert delivery_rows[0]["alert_event_id"] == payload["saved_alert_event_id"]
+    assert delivery_rows[0]["channel"] == "noop"
+    assert delivery_rows[0]["destination"] == "disabled"
+    assert delivery_rows[0]["status"] == "skipped"
 
 
 def test_cli_exit_guard_uses_configured_preflight_thresholds(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]

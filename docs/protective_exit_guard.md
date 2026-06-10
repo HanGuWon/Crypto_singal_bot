@@ -82,7 +82,10 @@ Adding `--notify` does not send anything unless global notifications, Discord we
 and `EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are all enabled. Telegram remains disallowed for this
 module. Adding `--save-event` stores the generated dry-run `AlertEvent` in the local
 `alert_events` audit table, and the `events` commands read those saved research events without
-sending notifications.
+sending notifications. If `--notify` is requested, the dry-run `AlertEvent` is persisted even when
+`--save-event` is omitted, and every delivery outcome is recorded in `notification_deliveries`.
+With default disabled notification settings this creates a skipped `noop` delivery record rather
+than contacting Discord.
 
 ## Upbit Spot Sell-Only Shape
 
