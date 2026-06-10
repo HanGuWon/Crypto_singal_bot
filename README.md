@@ -206,7 +206,8 @@ Safety-priority alerts such as risk warnings and invalidations use a separate bo
 are not blocked by earlier watchlist alerts. Terminal Telegram/Discord authorization or destination
 failures are quarantined in local channel state until configuration is fixed.
 Upside alerts are suppressed for quarantined symbols, stale or incomplete candle data,
-low-liquidity candidates, and candidates missing a usable benchmark.
+low-liquidity candidates, candidates missing a usable benchmark, and high scores driven by only one
+extreme component.
 Telegram, Discord, and digest payloads include the candidate data timestamp plus freshness in
 seconds/minutes so stale-data decisions are visible in the research output.
 Digest support is a disabled-by-default policy placeholder that can build a research-only preview

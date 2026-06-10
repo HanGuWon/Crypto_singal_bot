@@ -298,6 +298,8 @@ class AlertPolicy:
 def _eligible_for_upside_alert(candidate: SignalCandidate) -> bool:
     if candidate.entry_timing_status in {"falling_knife_suppress", "invalidated"}:
         return False
+    if _has_single_extreme_component(candidate):
+        return False
     return (
         candidate.is_closed_candle_signal
         and candidate.data_quality_status == "pass"
@@ -306,3 +308,16 @@ def _eligible_for_upside_alert(candidate: SignalCandidate) -> bool:
         and candidate.confidence != "low"
         and not has_critical_risk(candidate.risk_flags)
     )
+
+
+def _has_single_extreme_component(candidate: SignalCandidate) -> bool:
+    scored_components = [
+        value
+        for name, value in candidate.component_scores.items()
+        if name != "market_regime"
+    ]
+    if len(scored_components) < 2:
+        return False
+    ordered = sorted(scored_components, reverse=True)
+    constructive_count = sum(1 for value in scored_components if value >= 60)
+    return ordered[0] >= 90 and ordered[1] < 60 and constructive_count <= 1

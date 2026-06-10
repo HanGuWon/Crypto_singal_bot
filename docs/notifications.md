@@ -27,6 +27,7 @@ AlertPolicy handles:
 - invalidation
 - stale and failed-quality suppression
 - closed-candle only suppression
+- single-extreme-component suppression
 - low-liquidity and wide-spread suppression
 - symbol quarantine and missing-benchmark suppression
 

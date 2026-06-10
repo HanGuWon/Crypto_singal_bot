@@ -52,3 +52,21 @@ def test_entry_timing_blocking_status_suppresses_upside_alert() -> None:
     )
 
     assert AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70}) == []
+
+
+def test_single_extreme_component_suppresses_upside_alert() -> None:
+    candidate = make_candidate(
+        score=85.0,
+        confidence="medium",
+        component_scores={
+            "trend": 95.0,
+            "momentum": 55.0,
+            "volume": 50.0,
+            "liquidity": 50.0,
+            "breakout": 45.0,
+            "relative_strength": 50.0,
+            "market_regime": 55.0,
+        },
+    )
+
+    assert AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70}) == []
