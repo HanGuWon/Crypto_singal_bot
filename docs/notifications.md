@@ -35,6 +35,8 @@ AlertPolicy handles:
 Alert events and formatted messages carry both `data_timestamp_utc` and `data_freshness_seconds`.
 This makes freshness visible to downstream output adapters without letting notification code affect
 scoring or ranking.
+When saved research runs are available, CLI notification evaluation uses the previous compatible
+run snapshots for previous score, rank, and component-crossing context.
 
 Dedupe, cooldown, and hysteresis:
 

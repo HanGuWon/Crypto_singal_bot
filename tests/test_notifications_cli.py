@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from conftest import make_alert
-from crypto_signal_bot.cli import main
+from conftest import make_alert, make_candidate
+from crypto_signal_bot.cli import _previous_alert_policy_inputs, main
 from crypto_signal_bot.data.store import SQLiteStore
 from crypto_signal_bot.notifications.destinations import destination_hash
 
@@ -148,3 +148,66 @@ def test_outbox_list_and_drain_dry_run_exclude_terminal_rows(
     assert terminal_id not in dry_run_output
     assert "secret" not in dry_run_output
     assert "No notification was sent" in dry_run_output
+
+
+def test_previous_alert_policy_inputs_skip_current_saved_run(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "notifications.sqlite")
+    _insert_research_run(store, "previous-run", "2026-01-01T00:00:00+00:00")
+    _insert_research_run(store, "current-run", "2026-01-01T00:05:00+00:00")
+    store.insert_feature_snapshot(
+        {
+            "run_id": "previous-run",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "interval": "15m",
+            "data_timestamp_utc": "2026-01-01T00:00:00+00:00",
+            "feature": {"ret_1h": 0.01},
+            "component_scores": {"breakout": 70.0, "volume": 80.0},
+            "penalties": {},
+            "risk_flags": [],
+            "score_explanation": {"score": 78.0, "rank": 12},
+        }
+    )
+    store.insert_feature_snapshot(
+        {
+            "run_id": "current-run",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "interval": "15m",
+            "data_timestamp_utc": "2026-01-01T00:05:00+00:00",
+            "feature": {"ret_1h": 0.02},
+            "component_scores": {"breakout": 90.0, "volume": 90.0},
+            "penalties": {},
+            "risk_flags": [],
+            "score_explanation": {"score": 90.0, "rank": 1},
+        }
+    )
+
+    previous_scores, previous_ranks, previous_components = _previous_alert_policy_inputs(
+        store,
+        [make_candidate(source_run_id="current-run")],
+        current_run_id="current-run",
+    )
+
+    assert previous_scores == {"BTCUSDT": 78.0}
+    assert previous_ranks == {"BTCUSDT": 12}
+    assert previous_components == {"BTCUSDT": {"breakout": 70.0, "volume": 80.0}}
+
+
+def _insert_research_run(store: SQLiteStore, run_id: str, created_at_utc: str) -> None:
+    store.insert_research_run(
+        {
+            "run_id": run_id,
+            "created_at_utc": created_at_utc,
+            "commit_sha": "test",
+            "config_hash": "hash",
+            "exchange": "binance",
+            "quote": "USDT",
+            "interval": "15m",
+            "data_window_start_utc": created_at_utc,
+            "data_window_end_utc": created_at_utc,
+            "mock_mode": True,
+            "candidate_count": 1,
+            "research_warning": "Research alert only. Not financial advice. No order was placed.",
+        }
+    )

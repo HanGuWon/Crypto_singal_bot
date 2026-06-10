@@ -677,7 +677,7 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
             print(f"Saved research run {result.source_run_id}.")
 
     if args.notify:
-        _maybe_notify(result.candidates, settings)
+        _maybe_notify(result.candidates, settings, store=store, current_run_id=result.source_run_id)
     return 0
 
 
@@ -2303,7 +2303,13 @@ def _current_commit_sha() -> str:
     return result.stdout.strip() or "unknown"
 
 
-def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None:
+def _maybe_notify(
+    candidates: list[SignalCandidate],
+    settings: Settings,
+    *,
+    store: SQLiteStore | None = None,
+    current_run_id: str | None = None,
+) -> None:
     if not settings.notifications_enabled:
         print("Ranking completed; notifications skipped because they are disabled.")
         return
@@ -2321,8 +2327,18 @@ def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None
         ),
         state_store=SQLiteAlertStateStore(settings.database_path),
     )
-    events = policy.evaluate(candidates)
-    store = SQLiteStore(settings.database_path)
+    store = store or SQLiteStore(settings.database_path)
+    previous_scores, previous_ranks, previous_component_scores = _previous_alert_policy_inputs(
+        store,
+        candidates,
+        current_run_id=current_run_id,
+    )
+    events = policy.evaluate(
+        candidates,
+        previous_scores=previous_scores,
+        previous_ranks=previous_ranks,
+        previous_component_scores=previous_component_scores,
+    )
     limiter = SQLiteNotificationRateLimiter(
         store,
         global_max_per_minute=settings.alert_global_max_per_minute,
@@ -2360,6 +2376,66 @@ def _maybe_notify(candidates: list[SignalCandidate], settings: Settings) -> None
         f"{len(allowed_events)} allowed, {len(suppressed_events)} rate-limited, "
         f"{len(delivery_results)} delivery attempts recorded."
     )
+
+
+def _previous_alert_policy_inputs(
+    store: SQLiteStore,
+    candidates: list[SignalCandidate],
+    *,
+    current_run_id: str | None,
+) -> tuple[dict[str, float], dict[str, int], dict[str, dict[str, float]]]:
+    if not candidates:
+        return {}, {}, {}
+    exchange = candidates[0].exchange
+    interval = candidates[0].interval
+    symbols = {candidate.symbol for candidate in candidates}
+    previous_run = next(
+        (
+            row
+            for row in store.list_research_runs(limit=10)
+            if row["run_id"] != current_run_id
+            and row["exchange"] == exchange
+            and row["interval"] == interval
+        ),
+        None,
+    )
+    if previous_run is None:
+        return {}, {}, {}
+    previous_scores: dict[str, float] = {}
+    previous_ranks: dict[str, int] = {}
+    previous_component_scores: dict[str, dict[str, float]] = {}
+    for row in store.get_feature_snapshots(str(previous_run["run_id"])):
+        symbol = str(row["symbol"])
+        if symbol not in symbols:
+            continue
+        explanation = json.loads(str(row["score_explanation_json"]))
+        components = json.loads(str(row["component_scores_json"]))
+        if (score := _coerce_float(explanation.get("score"))) is not None:
+            previous_scores[symbol] = score
+        if (rank := _coerce_int(explanation.get("rank"))) is not None:
+            previous_ranks[symbol] = rank
+        component_values = {
+            str(name): float(value)
+            for name, value in components.items()
+            if isinstance(value, int | float)
+        }
+        if component_values:
+            previous_component_scores[symbol] = component_values
+    return previous_scores, previous_ranks, previous_component_scores
+
+
+def _coerce_float(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_int(value: Any) -> int | None:
+    try:
+        return None if value is None else int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _configured_notifiers(settings: Settings, channel: str | None = None) -> list[Notifier]:
