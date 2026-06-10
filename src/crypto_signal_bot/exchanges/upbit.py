@@ -86,7 +86,8 @@ class UpbitPublicClient:
                     self.cooldown_until_monotonic = time.monotonic() + retry_after
                 raise ExchangeRateLimitError("Upbit temporary block returned HTTP 418.")
             if response.status_code == 429:
-                sleep = self.retry_policy.sleep_for_attempt(attempt)
+                retry_after = _retry_after_seconds(response)
+                sleep = self.retry_policy.sleep_for_attempt(attempt, retry_after=retry_after)
                 time.sleep(sleep)
                 last_error = ExchangeRateLimitError("Upbit rate limit returned HTTP 429.")
                 continue

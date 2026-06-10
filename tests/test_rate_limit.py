@@ -103,6 +103,46 @@ def test_upbit_418_sets_cooldown_and_blocks_next_request(monkeypatch) -> None:  
     assert len(http_client.calls) == 1
 
 
+def test_upbit_429_retry_after_retries_then_succeeds(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    sleeps: list[float] = []
+    monkeypatch.setattr("crypto_signal_bot.exchanges.upbit.time.sleep", sleeps.append)
+    http_client = FakeHttpClient([
+        FakeResponse(429, headers={"Retry-After": "1.5"}),
+        FakeResponse(200, payload={"ok": True}),
+    ])
+    client = UpbitPublicClient(
+        http_client=http_client,
+        retry_policy=RetryPolicy(max_attempts=2, max_sleep_seconds=10, jitter_seconds=0),
+    )
+
+    assert client._get("/v1/market/all", params={"is_details": "true"}, group="market") == {"ok": True}
+    assert sleeps == [1.5]
+    assert len(http_client.calls) == 2
+
+
+def test_upbit_5xx_retry_is_bounded(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    sleeps: list[float] = []
+    monkeypatch.setattr("crypto_signal_bot.exchanges.upbit.time.sleep", sleeps.append)
+    http_client = FakeHttpClient([FakeResponse(503), FakeResponse(200, payload={"ok": True})])
+    client = UpbitPublicClient(
+        http_client=http_client,
+        retry_policy=RetryPolicy(max_attempts=2, jitter_seconds=0),
+    )
+
+    assert client._get("/v1/market/all", params={"is_details": "true"}, group="market") == {"ok": True}
+    assert len(http_client.calls) == 2
+    assert len(sleeps) == 1
+
+
+def test_upbit_4xx_does_not_retry() -> None:
+    http_client = FakeHttpClient([FakeResponse(404)])
+    client = UpbitPublicClient(http_client=http_client, retry_policy=RetryPolicy(max_attempts=3))
+
+    with pytest.raises(ExchangeClientError):
+        client._get("/v1/market/all", params={"is_details": "true"}, group="market")
+    assert len(http_client.calls) == 1
+
+
 def test_binance_5xx_retry_is_bounded(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     sleeps: list[float] = []
     monkeypatch.setattr("crypto_signal_bot.exchanges.binance.time.sleep", sleeps.append)
