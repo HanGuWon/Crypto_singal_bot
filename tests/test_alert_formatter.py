@@ -15,13 +15,30 @@ def test_telegram_formatter_preserves_research_warning_after_truncation() -> Non
     assert len(text) <= 300
     assert RESEARCH_WARNING in text
     assert "Data freshness:" in text
+    assert "Alert id:" in text
+
+
+def test_telegram_formatter_includes_audit_ids() -> None:
+    event = make_alert()
+    text = format_telegram_event(event)
+    assert event.alert_event_id in text
+    assert event.source_run_id in text
 
 
 def test_discord_payload_blocks_mentions_by_default() -> None:
-    payload = format_discord_payload(make_alert())
+    event = make_alert()
+    payload = format_discord_payload(event)
     assert payload["allowed_mentions"] == {"parse": []}
     assert any(
         field["name"] == "Data freshness"
+        for field in payload["embeds"][0]["fields"]
+    )
+    assert any(
+        field["name"] == "Alert event id" and field["value"] == event.alert_event_id
+        for field in payload["embeds"][0]["fields"]
+    )
+    assert any(
+        field["name"] == "Source run id" and field["value"] == event.source_run_id
         for field in payload["embeds"][0]["fields"]
     )
     combined = str(payload).lower()

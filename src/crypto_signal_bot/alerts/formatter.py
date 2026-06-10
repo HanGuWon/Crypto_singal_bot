@@ -66,6 +66,8 @@ def format_discord_payload(
         {"name": "Invalidation", "value": event.invalidation_condition},
         {"name": "Data timestamp UTC", "value": event.data_timestamp_utc},
         {"name": "Data freshness", "value": _format_freshness(event.data_freshness_seconds), "inline": True},
+        {"name": "Alert event id", "value": event.alert_event_id},
+        {"name": "Source run id", "value": event.source_run_id},
     ]
     warning = _warning_text(event)
     description = warning
@@ -116,6 +118,8 @@ def _telegram_text(
         f"Price: {price}",
         f"Data timestamp UTC: {escape(event.data_timestamp_utc)}",
         f"Data freshness: {_format_freshness(event.data_freshness_seconds)}",
+        f"Alert id: {escape(event.alert_event_id)}",
+        f"Source run id: {escape(event.source_run_id)}",
         f"Drivers: {escape(drivers)}",
         f"Risk flags: {escape(risks)}",
         f"Invalidation: {escape(invalidation)}",

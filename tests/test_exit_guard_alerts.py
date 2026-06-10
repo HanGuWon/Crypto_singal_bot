@@ -62,6 +62,14 @@ def test_protective_exit_blocked_preflight_builds_discord_safe_alert_event() -> 
     assert "dry_run_only" in event.drivers
     assert payload["content"] == EXIT_GUARD_WARNING
     assert payload["allowed_mentions"] == {"parse": []}
+    assert any(
+        field["name"] == "Alert event id" and field["value"] == event.alert_event_id
+        for field in payload["embeds"][0]["fields"]
+    )
+    assert any(
+        field["name"] == "Source run id" and field["value"] == "exit-signal-1"
+        for field in payload["embeds"][0]["fields"]
+    )
     assert all(word not in str(payload).lower() for word in FORBIDDEN_ALERT_WORDS)
 
 

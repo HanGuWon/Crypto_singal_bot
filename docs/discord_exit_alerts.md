@@ -28,7 +28,7 @@ Every exit guard alert payload must include:
 - state and risk-reduction reason
 - safety-block reasons, if any
 - dry-run/manual-approval/live phase label
-- audit id
+- audit id (`alert_event_id`) and source run id (`source_run_id`)
 - research and safety warning
 
 Required wording:
