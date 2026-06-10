@@ -63,6 +63,16 @@ class DiscordWebhookNotifier:
                 retries += 1
                 time.sleep(_discord_retry_after(response) or 1.0)
                 continue
+            if response.status_code == 429:
+                return NotificationResult(
+                    self.channel,
+                    "failed",
+                    "discord_webhook",
+                    error_code="429",
+                    error_message="Discord webhook delivery rate limited.",
+                    provider_response=_safe_json_with_retry_after(response),
+                    retry_count=retries,
+                )
             if 200 <= response.status_code < 300:
                 return NotificationResult(
                     self.channel,
@@ -108,3 +118,11 @@ def _safe_json(response: Any) -> dict:
         return data if isinstance(data, dict) else {"data": data}
     except Exception:
         return {}
+
+
+def _safe_json_with_retry_after(response: Any) -> dict:
+    data = _safe_json(response)
+    retry_after = _discord_retry_after(response)
+    if retry_after is None or "retry_after" in data:
+        return data
+    return {**data, "retry_after": retry_after}

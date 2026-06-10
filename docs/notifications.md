@@ -46,6 +46,8 @@ Dedupe, cooldown, and hysteresis:
 - Rate-limited events are saved with `suppressed_by_rate_limit` delivery status for audit.
 - Terminal channel failures such as Telegram 401/403 and Discord 401/403/404 are quarantined in
   `notification_channel_state` until manual reset/configuration repair.
+- Provider 429 failures preserve parsed `retry_after` metadata after bounded retries are exhausted,
+  so cooldown state and outbox audit rows can explain the next retry window.
 - The CLI creates `notification_outbox` rows before provider sends, then claims and completes those
   rows during dispatch.
 - Digest support is a separate disabled-by-default policy path. `DigestPolicy` can build a

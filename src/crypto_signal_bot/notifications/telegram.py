@@ -65,6 +65,16 @@ class TelegramNotifier:
                 retries += 1
                 time.sleep(_telegram_retry_after(response) or 1.0)
                 continue
+            if response.status_code == 429:
+                return NotificationResult(
+                    self.channel,
+                    "failed",
+                    self.chat_id,
+                    error_code="429",
+                    error_message="Telegram delivery rate limited.",
+                    provider_response=_safe_json_with_retry_after(response),
+                    retry_count=retries,
+                )
             if 200 <= response.status_code < 300:
                 return NotificationResult(
                     self.channel,
@@ -105,3 +115,11 @@ def _safe_json(response: Any) -> dict:
         return data if isinstance(data, dict) else {"data": data}
     except Exception:
         return {}
+
+
+def _safe_json_with_retry_after(response: Any) -> dict:
+    data = _safe_json(response)
+    retry_after = _telegram_retry_after(response)
+    if retry_after is None or "retry_after" in data:
+        return data
+    return {**data, "retry_after": retry_after}

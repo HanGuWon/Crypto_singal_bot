@@ -52,6 +52,24 @@ def test_discord_retries_429_retry_after_header(monkeypatch) -> None:  # type: i
     assert len(client.posts) == 2
 
 
+def test_discord_preserves_retry_after_header_when_429_retries_exhausted() -> None:
+    client = FakeClient([FakeResponse(429, headers={"Retry-After": "3"})])
+    notifier = DiscordWebhookNotifier(
+        webhook_url="https://discord.com/api/webhooks/1/x",
+        http_client=client,
+        max_retries=0,
+    )
+
+    result = notifier.send(make_alert())
+
+    assert result.status == "failed"
+    assert result.error_code == "429"
+    assert result.provider_response is not None
+    assert result.provider_response["retry_after"] == 3.0
+    assert result.retry_count == 0
+    assert len(client.posts) == 1
+
+
 @pytest.mark.parametrize("status_code", [401, 403, 404])
 def test_discord_does_not_retry_authorization_or_destination_failures(status_code: int) -> None:
     client = FakeClient([FakeResponse(status_code)])

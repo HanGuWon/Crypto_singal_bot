@@ -39,6 +39,20 @@ def test_telegram_retries_429_retry_after(monkeypatch) -> None:  # type: ignore[
     assert len(client.posts) == 2
 
 
+def test_telegram_preserves_retry_after_when_429_retries_exhausted() -> None:
+    client = FakeClient([FakeResponse(429, {"parameters": {"retry_after": 2}})])
+    notifier = TelegramNotifier(bot_token="token", chat_id="chat", http_client=client, max_retries=0)
+
+    result = notifier.send(make_alert())
+
+    assert result.status == "failed"
+    assert result.error_code == "429"
+    assert result.provider_response is not None
+    assert result.provider_response["retry_after"] == 2.0
+    assert result.retry_count == 0
+    assert len(client.posts) == 1
+
+
 @pytest.mark.parametrize("status_code", [401, 403])
 def test_telegram_does_not_retry_authorization_failures(status_code: int) -> None:
     client = FakeClient([FakeResponse(status_code, {"ok": False})])
