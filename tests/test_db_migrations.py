@@ -42,6 +42,7 @@ def test_upgrade_from_pre_outbox_schema(tmp_path) -> None:
     assert _table_exists(db_path, "research_runs")
     assert _table_exists(db_path, "feature_snapshots")
     assert _table_exists(db_path, "entry_timing_snapshots")
+    assert _table_exists(db_path, "manual_approval_requests")
 
 
 def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
@@ -57,6 +58,7 @@ def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
     assert _table_exists(db_path, "research_runs")
     assert _table_exists(db_path, "feature_snapshots")
     assert _table_exists(db_path, "entry_timing_snapshots")
+    assert _table_exists(db_path, "manual_approval_requests")
 
 
 def test_entry_timing_snapshot_insert_is_idempotent(tmp_path) -> None:

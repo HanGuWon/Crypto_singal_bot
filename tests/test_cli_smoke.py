@@ -310,6 +310,70 @@ def test_cli_exit_guard_can_save_preflight_event_to_audit_table(tmp_path, monkey
     assert "No order was placed" in show_payload["research_warning"]
 
 
+def test_cli_exit_guard_manual_approval_request_is_audit_only(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    assert main(
+        [
+            "exit-guard",
+            "preflight",
+            "--exchange",
+            "binance_usdm_futures",
+            "--symbol",
+            "BTCUSDT",
+            "--action",
+            "close_short",
+            "--side",
+            "BUY",
+            "--quantity",
+            "2",
+            "--position-mode",
+            "one_way",
+            "--position-side",
+            "BOTH",
+            "--reduce-only",
+            "--mock-orderbook",
+            "--request-approval",
+            "--approval-ttl-minutes",
+            "15",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    request_id = payload["manual_approval_request"]["id"]
+    assert payload["saved_event"] is True
+    assert payload["manual_approval_request"]["status"] == "pending"
+    assert payload["manual_approval_request"]["source_alert_event_id"] == payload["saved_alert_event_id"]
+    assert payload["live_order_submitted"] is False
+
+    assert main(["exit-guard", "approvals", "list", "--status", "pending"]) == 0
+    list_payload = json.loads(capsys.readouterr().out)
+    assert list_payload["count"] == 1
+    assert list_payload["approval_requests"][0]["id"] == request_id
+
+    assert main(["exit-guard", "approvals", "show", request_id]) == 0
+    show_payload = json.loads(capsys.readouterr().out)
+    request = show_payload["approval_request"]
+    assert request["status"] == "pending"
+    assert request["source_alert_event_id"] == payload["saved_alert_event_id"]
+    assert request["request_payload"]["intent"]["action"] == "close_short"
+    assert "No order was placed" in show_payload["research_warning"]
+
+    assert main(["exit-guard", "approvals", "approve", request_id]) == 1
+    assert "require --confirm" in capsys.readouterr().err
+
+    assert main(["exit-guard", "approvals", "approve", request_id, "--confirm", "--note", "reviewed"]) == 0
+    approved_payload = json.loads(capsys.readouterr().out)
+    assert approved_payload["approval_request"]["status"] == "approved"
+    assert approved_payload["approval_request"]["decision_note"] == "reviewed"
+    assert approved_payload["live_execution_allowed"] is False
+    assert "No order was placed" in approved_payload["research_warning"]
+
+    assert main(["exit-guard", "approvals", "reject", request_id, "--confirm"]) == 1
+    assert "no longer pending" in capsys.readouterr().err
+
+
 def test_cli_rank_marks_insufficient_history(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("MIN_HISTORY_BARS", "120")

@@ -248,12 +248,33 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Persist the dry-run protective exit AlertEvent to the local audit table.",
     )
+    preflight.add_argument(
+        "--request-approval",
+        action="store_true",
+        help="Persist a manual approval request bound to this dry-run event without executing anything.",
+    )
+    preflight.add_argument("--approval-ttl-minutes", type=int, default=30)
     events = exit_guard_sub.add_parser("events", help="Inspect saved protective exit dry-run events.")
     events_sub = events.add_subparsers(dest="exit_guard_events_command", required=True)
     events_list = events_sub.add_parser("list", help="List saved protective exit events.")
     events_list.add_argument("--limit", type=int, default=20)
     events_show = events_sub.add_parser("show", help="Show one saved protective exit event.")
     events_show.add_argument("alert_event_id")
+    approvals = exit_guard_sub.add_parser("approvals", help="Inspect or decide dry-run manual approvals.")
+    approvals_sub = approvals.add_subparsers(dest="exit_guard_approvals_command", required=True)
+    approvals_list = approvals_sub.add_parser("list", help="List manual approval requests.")
+    approvals_list.add_argument("--status", choices=["pending", "approved", "rejected", "expired"], default=None)
+    approvals_list.add_argument("--limit", type=int, default=20)
+    approvals_show = approvals_sub.add_parser("show", help="Show one manual approval request.")
+    approvals_show.add_argument("request_id")
+    approvals_approve = approvals_sub.add_parser("approve", help="Approve a dry-run manual approval request.")
+    approvals_approve.add_argument("request_id")
+    approvals_approve.add_argument("--confirm", action="store_true")
+    approvals_approve.add_argument("--note", default=None)
+    approvals_reject = approvals_sub.add_parser("reject", help="Reject a dry-run manual approval request.")
+    approvals_reject.add_argument("request_id")
+    approvals_reject.add_argument("--confirm", action="store_true")
+    approvals_reject.add_argument("--note", default=None)
     return parser
 
 
@@ -785,6 +806,8 @@ def _exit_guard(args: argparse.Namespace, settings: Settings) -> int:
         return _exit_guard_preflight(args, settings)
     if args.exit_guard_command == "events":
         return _exit_guard_events(args, settings)
+    if args.exit_guard_command == "approvals":
+        return _exit_guard_approvals(args, settings)
     raise ConfigError(f"Unknown exit-guard command: {args.exit_guard_command}")
 
 
@@ -846,9 +869,20 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         data_quality_status="pass",
     )
     event = build_protective_exit_alert_event(signal, intent=intent, slippage=slippage, now=now)
-    event_saved = bool(args.save_event or args.notify)
+    if args.approval_ttl_minutes <= 0:
+        raise ConfigError("--approval-ttl-minutes must be positive.")
+    event_saved = bool(args.save_event or args.notify or args.request_approval)
     if event_saved:
         store.insert_alert_event(event)
+    approval_request = None
+    if args.request_approval:
+        approval_request = _create_manual_approval_request(
+            store,
+            event=event,
+            intent=intent,
+            created_at=now,
+            ttl_minutes=args.approval_ttl_minutes,
+        )
     notification_results: list[dict[str, object]] = []
     delivery_audit_count = 0
     notification_note = "not_requested"
@@ -909,6 +943,7 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
             "notification_results": notification_results,
             "delivery_audit_recorded": delivery_audit_count > 0,
             "delivery_audit_count": delivery_audit_count,
+            "manual_approval_request": approval_request,
             "research_warning": (
                 "Protective exit guard dry-run research only. Not financial advice. "
                 "No new position was opened. No order was placed."
@@ -916,6 +951,51 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         }
     )
     return 0
+
+
+def _create_manual_approval_request(
+    store: SQLiteStore,
+    *,
+    event: Any,
+    intent: RiskReducingOrderIntent,
+    created_at: datetime,
+    ttl_minutes: int,
+) -> dict[str, object]:
+    expires_at = created_at + timedelta(minutes=ttl_minutes)
+    request_id = f"exit-approval-{uuid4()}"
+    request_payload = {
+        "research_warning": (
+            "Manual approval request is for dry-run audit only. Not financial advice. "
+            "No order was placed."
+        ),
+        "approval_scope": "protective_exit_guard_dry_run",
+        "source_alert_event_id": event.alert_event_id,
+        "intent": _exit_guard_intent_to_dict(intent),
+    }
+    record = {
+        "id": request_id,
+        "created_at_utc": created_at.isoformat(),
+        "expires_at_utc": expires_at.isoformat(),
+        "status": "pending",
+        "exchange": intent.exchange,
+        "symbol": intent.symbol,
+        "interval": event.interval,
+        "action": intent.action,
+        "side": intent.side,
+        "quantity": intent.quantity,
+        "position_mode": intent.position_mode,
+        "position_side": intent.position_side,
+        "source_alert_event_id": event.alert_event_id,
+        "request_payload": request_payload,
+    }
+    store.insert_manual_approval_request(record)
+    return {
+        "id": request_id,
+        "status": "pending",
+        "expires_at_utc": expires_at.isoformat(),
+        "source_alert_event_id": event.alert_event_id,
+        "approval_scope": "protective_exit_guard_dry_run",
+    }
 
 
 def _exit_guard_events(args: argparse.Namespace, settings: Settings) -> int:
@@ -956,6 +1036,67 @@ def _exit_guard_events(args: argparse.Namespace, settings: Settings) -> int:
     raise ConfigError(f"Unknown exit-guard events command: {args.exit_guard_events_command}")
 
 
+def _exit_guard_approvals(args: argparse.Namespace, settings: Settings) -> int:
+    store = SQLiteStore(settings.database_path)
+    now = utc_now()
+    store.expire_manual_approval_requests(now.isoformat())
+    if args.exit_guard_approvals_command == "list":
+        rows = store.list_manual_approval_requests(status=args.status, limit=args.limit)
+        _print_json(
+            {
+                "approval_requests": [_manual_approval_row_to_dict(row, include_payload=False) for row in rows],
+                "count": len(rows),
+                "research_warning": (
+                    "Manual approvals are dry-run audit records only. Not financial advice. "
+                    "No order was placed."
+                ),
+            }
+        )
+        return 0
+    if args.exit_guard_approvals_command == "show":
+        row = store.fetch_manual_approval_request(args.request_id)
+        if row is None:
+            print("Manual approval request not found.", file=sys.stderr)
+            return 1
+        _print_json(
+            {
+                "approval_request": _manual_approval_row_to_dict(row),
+                "research_warning": (
+                    "Manual approvals are dry-run audit records only. Not financial advice. "
+                    "No order was placed."
+                ),
+            }
+        )
+        return 0
+    if args.exit_guard_approvals_command in {"approve", "reject"}:
+        if not args.confirm:
+            print("Manual approval decisions require --confirm.", file=sys.stderr)
+            return 1
+        status = "approved" if args.exit_guard_approvals_command == "approve" else "rejected"
+        updated = store.decide_manual_approval_request(
+            args.request_id,
+            status=status,
+            decided_at_utc=now.isoformat(),
+            decision_note=args.note,
+        )
+        row = store.fetch_manual_approval_request(args.request_id)
+        if not updated:
+            print("Manual approval request is missing, expired, or no longer pending.", file=sys.stderr)
+            return 1
+        _print_json(
+            {
+                "approval_request": _manual_approval_row_to_dict(row) if row is not None else None,
+                "live_execution_allowed": False,
+                "research_warning": (
+                    "Manual approval decision recorded for audit only. Not financial advice. "
+                    "No order was placed."
+                ),
+            }
+        )
+        return 0
+    raise ConfigError(f"Unknown exit-guard approvals command: {args.exit_guard_approvals_command}")
+
+
 def _exit_guard_event_summary(event: Any) -> dict[str, object]:
     return {
         "alert_event_id": event.alert_event_id,
@@ -970,6 +1111,29 @@ def _exit_guard_event_summary(event: Any) -> dict[str, object]:
         "data_timestamp_utc": event.data_timestamp_utc,
         "source_run_id": event.source_run_id,
     }
+
+
+def _manual_approval_row_to_dict(row: Any, *, include_payload: bool = True) -> dict[str, object]:
+    data: dict[str, object] = {
+        "id": row["id"],
+        "created_at_utc": row["created_at_utc"],
+        "expires_at_utc": row["expires_at_utc"],
+        "status": row["status"],
+        "exchange": row["exchange"],
+        "symbol": row["symbol"],
+        "interval": row["interval"],
+        "action": row["action"],
+        "side": row["side"],
+        "quantity": row["quantity"],
+        "position_mode": row["position_mode"],
+        "position_side": row["position_side"],
+        "source_alert_event_id": row["source_alert_event_id"],
+        "decided_at_utc": row["decided_at_utc"],
+        "decision_note": row["decision_note"],
+    }
+    if include_payload:
+        data["request_payload"] = json.loads(str(row["request_payload_json"]))
+    return data
 
 
 def _notification_delivery_row_to_dict(row: Any) -> dict[str, object]:

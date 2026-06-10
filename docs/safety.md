@@ -63,6 +63,8 @@ Protective exit guard note:
   snapshot is missing, stale, shallow, or above the configured slippage threshold.
 - Preflight age and slippage thresholds are configurable, but invalid non-positive values fail
   closed during config validation.
+- Manual approval requests are audit records only. Recording an approval does not enable private
+  reads, live execution, or exchange order endpoints.
 - Protective exit alert events are Discord-only research events and remain gated by disabled-by-default
   notification settings.
 - Any future private-account or execution safety feature is out of scope for this public-data MVP.

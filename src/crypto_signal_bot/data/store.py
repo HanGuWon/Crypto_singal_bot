@@ -237,6 +237,30 @@ CREATE INDEX IF NOT EXISTS idx_entry_timing_snapshots_status
 ON entry_timing_snapshots(status, research_priority_score);
 """
 
+MANUAL_APPROVAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS manual_approval_requests (
+  id TEXT PRIMARY KEY,
+  created_at_utc TEXT NOT NULL,
+  expires_at_utc TEXT NOT NULL,
+  status TEXT NOT NULL,
+  exchange TEXT NOT NULL,
+  symbol TEXT NOT NULL,
+  interval TEXT NOT NULL,
+  action TEXT NOT NULL,
+  side TEXT NOT NULL,
+  quantity REAL NOT NULL,
+  position_mode TEXT,
+  position_side TEXT,
+  source_alert_event_id TEXT NOT NULL,
+  request_payload_json TEXT NOT NULL,
+  decided_at_utc TEXT,
+  decision_note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_approval_status_expiry
+ON manual_approval_requests(status, expires_at_utc);
+"""
+
 SCHEMA_MIGRATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS schema_migrations (
   id INTEGER PRIMARY KEY,
@@ -256,6 +280,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "symbol_health", _split_sql_script(SYMBOL_HEALTH_SCHEMA)),
     Migration(4, "research_runs", _split_sql_script(RESEARCH_RUN_SCHEMA)),
     Migration(5, "entry_timing_snapshots", _split_sql_script(ENTRY_TIMING_SCHEMA)),
+    Migration(6, "manual_approval_requests", _split_sql_script(MANUAL_APPROVAL_SCHEMA)),
 )
 
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -417,6 +442,24 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "risk_flags_json",
         "payload_json",
     },
+    "manual_approval_requests": {
+        "id",
+        "created_at_utc",
+        "expires_at_utc",
+        "status",
+        "exchange",
+        "symbol",
+        "interval",
+        "action",
+        "side",
+        "quantity",
+        "position_mode",
+        "position_side",
+        "source_alert_event_id",
+        "request_payload_json",
+        "decided_at_utc",
+        "decision_note",
+    },
 }
 
 REQUIRED_INDEXES = {
@@ -429,6 +472,7 @@ REQUIRED_INDEXES = {
     "idx_feature_snapshots_run",
     "idx_entry_timing_snapshots_run",
     "idx_entry_timing_snapshots_status",
+    "idx_manual_approval_status_expiry",
 }
 
 
@@ -1165,6 +1209,107 @@ class SQLiteStore:
                 """,
                 (alert_event_id,),
             ).fetchall()
+
+    def insert_manual_approval_request(self, record: dict[str, object]) -> None:
+        self.init_schema()
+        payload = dict(record)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO manual_approval_requests VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                """,
+                (
+                    payload["id"],
+                    payload["created_at_utc"],
+                    payload["expires_at_utc"],
+                    payload["status"],
+                    payload["exchange"],
+                    payload["symbol"],
+                    payload["interval"],
+                    payload["action"],
+                    payload["side"],
+                    payload["quantity"],
+                    payload["position_mode"],
+                    payload["position_side"],
+                    payload["source_alert_event_id"],
+                    json.dumps(payload["request_payload"]),
+                ),
+            )
+
+    def list_manual_approval_requests(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 20,
+    ) -> list[sqlite3.Row]:
+        self.init_schema()
+        row_limit = max(0, limit)
+        if row_limit == 0:
+            return []
+        sql = "SELECT * FROM manual_approval_requests"
+        params: list[object] = []
+        if status is not None:
+            sql += " WHERE status=?"
+            params.append(status)
+        sql += " ORDER BY created_at_utc DESC, id DESC LIMIT ?"
+        params.append(row_limit)
+        with self.connect() as conn:
+            return list(conn.execute(sql, params))
+
+    def fetch_manual_approval_request(self, request_id: str) -> sqlite3.Row | None:
+        self.init_schema()
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT *
+                FROM manual_approval_requests
+                WHERE id=?
+                """,
+                (request_id,),
+            ).fetchone()
+
+    def expire_manual_approval_requests(self, now_utc: str) -> int:
+        self.init_schema()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE manual_approval_requests
+                SET status='expired',
+                    decided_at_utc=?,
+                    decision_note='expired before approval'
+                WHERE status='pending'
+                  AND expires_at_utc < ?
+                """,
+                (now_utc, now_utc),
+            )
+        return int(cursor.rowcount)
+
+    def decide_manual_approval_request(
+        self,
+        request_id: str,
+        *,
+        status: str,
+        decided_at_utc: str,
+        decision_note: str | None = None,
+    ) -> bool:
+        if status not in {"approved", "rejected"}:
+            raise ValueError("Manual approval decision must be approved or rejected.")
+        self.init_schema()
+        with self.connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE manual_approval_requests
+                SET status=?,
+                    decided_at_utc=?,
+                    decision_note=?
+                WHERE id=?
+                  AND status='pending'
+                  AND expires_at_utc >= ?
+                """,
+                (status, decided_at_utc, decision_note, request_id, decided_at_utc),
+            )
+        return int(cursor.rowcount) == 1
 
     def get_notification_channel_state(
         self,

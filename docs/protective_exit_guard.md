@@ -74,8 +74,11 @@ CLI dry-run example:
 
 ```bash
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --save-event
+python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_short --side BUY --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --request-approval
 python -m crypto_signal_bot.cli exit-guard events list --limit 10
 python -m crypto_signal_bot.cli exit-guard events show ALERT_EVENT_ID
+python -m crypto_signal_bot.cli exit-guard approvals list --status pending
+python -m crypto_signal_bot.cli exit-guard approvals approve REQUEST_ID --confirm --note "reviewed"
 ```
 
 Adding `--notify` does not send anything unless global notifications, Discord webhook notifications,
@@ -88,6 +91,11 @@ With default disabled notification settings this creates a skipped `noop` delive
 than contacting Discord. The `exit-guard events show` command returns both the saved event and the
 matching delivery audit rows, so dry-run notification behavior can be inspected without exposing
 secrets or sending an order.
+
+Adding `--request-approval` creates a manual approval request bound to the dry-run event and the
+validated risk-reducing intent. Approval requests expire, can be approved or rejected only with
+`--confirm`, and remain audit records only. They do not enable private reads, live orders, sell
+orders, close orders, or any exchange endpoint.
 
 ## Upbit Spot Sell-Only Shape
 
@@ -142,7 +150,7 @@ See `docs/discord_exit_alerts.md` for the dedicated notification boundary.
 2. Dry-run signal generation from closed public candles only.
 3. Private read adapters for balances/positions only, still no live orders.
 4. Exchange order-test or testnet-only validation, still no live orders.
-5. Manual approval flow.
+5. Manual approval flow for audit-only approvals.
 6. Limited live close-only/sell-only execution only after a separate safety review.
 
 The repository is currently in phase 1 for this module.

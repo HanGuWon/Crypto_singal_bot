@@ -96,8 +96,11 @@ Protective exit guard dry-run preflight:
 ```bash
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook
 python -m crypto_signal_bot.cli exit-guard preflight --exchange upbit_spot --symbol KRW-BTC --action sell_only --side ask --quantity 0.01 --mock-orderbook --save-event --notify
+python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_short --side BUY --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --request-approval
 python -m crypto_signal_bot.cli exit-guard events list --limit 10
 python -m crypto_signal_bot.cli exit-guard events show ALERT_EVENT_ID
+python -m crypto_signal_bot.cli exit-guard approvals list --status pending
+python -m crypto_signal_bot.cli exit-guard approvals approve REQUEST_ID --confirm --note "reviewed"
 ```
 
 The preflight command builds a research JSON event from public orderbook data only. The `--notify`
@@ -108,7 +111,8 @@ overridden per dry-run command. `--save-event` persists the dry-run `AlertEvent`
 table without sending a notification or placing an order. When `--notify` is used, the generated
 `AlertEvent` is also persisted for auditability and each delivery attempt, failure, or disabled
 skip is recorded in `notification_deliveries`. `exit-guard events show ALERT_EVENT_ID` includes the
-saved event and its notification delivery audit rows.
+saved event and its notification delivery audit rows. `--request-approval` creates a bounded manual
+approval audit record, but approval decisions are records only; they do not unlock live execution.
 
 Database maintenance:
 
