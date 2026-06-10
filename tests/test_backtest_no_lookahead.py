@@ -7,6 +7,7 @@ import pytest
 
 from crypto_signal_bot.backtest.engine import BacktestAssumptions, diagnostic_event_study, event_study_next_open
 from crypto_signal_bot.backtest.leakage_checks import assert_next_candle_entry
+from crypto_signal_bot.backtest.metrics import summarize_returns
 from crypto_signal_bot.data.collector import make_mock_candles
 
 
@@ -53,6 +54,19 @@ def test_costs_reduce_diagnostic_returns() -> None:
     )
 
     assert float(with_cost["average_return"]) < float(no_cost["average_return"])
+
+
+def test_return_summary_includes_risk_distribution_metrics() -> None:
+    summary = summarize_returns([0.10, -0.05, 0.02, -0.01, -0.20])
+
+    assert summary["trades"] == 5.0
+    assert summary["average_win"] == pytest.approx(0.06)
+    assert summary["average_loss"] < 0
+    assert summary["gain_loss_factor"] > 0
+    assert summary["win_loss_ratio"] > 0
+    assert summary["sortino"] != 0
+    assert summary["worst_return"] == -0.20
+    assert summary["tail_loss_5pct"] == -0.20
 
 
 def test_benchmark_windows_align_point_in_time() -> None:

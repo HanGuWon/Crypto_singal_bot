@@ -29,6 +29,10 @@ Feature groups:
 Signals are generated only from closed candles. Backtest entries must occur after the signal candle
 close, using the next candle open in the smoke engine.
 
+Diagnostic backtest summaries report event counts, hit rate, average return, average win/loss,
+gain/loss factor, max drawdown, Sharpe, Sortino, worst return, and 5th-percentile tail loss. These
+are event-study diagnostics, not a portfolio execution model.
+
 Entry timing research:
 
 - The original upside score remains the first-stage candidate score.
