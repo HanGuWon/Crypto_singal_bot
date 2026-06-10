@@ -355,7 +355,8 @@ def _breakout_watch_crossed(
     previous_breakout = None if previous_components is None else previous_components.get("breakout")
     return (
         breakout >= config.breakout_threshold
-        and (previous_breakout is None or previous_breakout < config.breakout_threshold)
+        and previous_breakout is not None
+        and previous_breakout < config.breakout_threshold
         and candidate.component_scores.get("volume", 0.0) >= config.breakout_min_volume
         and candidate.component_scores.get("liquidity", 0.0) >= config.breakout_min_liquidity
     )

@@ -90,9 +90,14 @@ def test_breakout_watch_requires_component_threshold_crossing() -> None:
         previous_scores={"BTCUSDT": 85.0},
         previous_component_scores={"BTCUSDT": {"breakout": 80.0}},
     )
+    missing_previous_component = AlertPolicy().evaluate(
+        [candidate],
+        previous_scores={"BTCUSDT": 85.0},
+    )
 
     assert any(event.event_type == "BREAKOUT_WATCH" for event in fresh_crossing)
     assert not any(event.event_type == "BREAKOUT_WATCH" for event in already_above)
+    assert not any(event.event_type == "BREAKOUT_WATCH" for event in missing_previous_component)
 
 
 def test_entry_timing_blocking_status_suppresses_upside_alert() -> None:
