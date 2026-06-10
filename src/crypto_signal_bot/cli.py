@@ -198,6 +198,17 @@ def _build_parser() -> argparse.ArgumentParser:
     strategy_scan.add_argument("--top", type=int, default=20)
     strategy_scan.add_argument("--format", choices=["table", "json"], default="table")
     strategy_scan.add_argument("--mock", action="store_true", help="Seed deterministic fixture data before scanning.")
+    strategy_event_study = strategy_sub.add_parser(
+        "event-study",
+        help="Compare research-only strategy variants with closed-candle, next-open diagnostics.",
+    )
+    strategy_event_study.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    strategy_event_study.add_argument("--quote", default=None)
+    strategy_event_study.add_argument("--interval", default="5m")
+    strategy_event_study.add_argument("--horizons", default="1,3,6,12", help="Comma-separated forward bar horizons.")
+    strategy_event_study.add_argument("--min-history-bars", type=int, default=None)
+    strategy_event_study.add_argument("--format", choices=["table", "json"], default="json")
+    strategy_event_study.add_argument("--mock", action="store_true", help="Seed deterministic fixture data first.")
     return parser
 
 
@@ -466,6 +477,8 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
 def _strategy(args: argparse.Namespace, settings: Settings) -> int:
     if args.strategy_command == "scan":
         return _strategy_scan(args, settings)
+    if args.strategy_command == "event-study":
+        return _strategy_event_study(args, settings)
     raise ConfigError(f"Unknown strategy command: {args.strategy_command}")
 
 
@@ -513,6 +526,89 @@ def _strategy_timeframes(base_interval: str, timeframes: str | None) -> list[str
         return [base_interval]
     values = [value.strip() for value in timeframes.split(",") if value.strip()]
     return values or [base_interval]
+
+
+def _strategy_event_study(args: argparse.Namespace, settings: Settings) -> int:
+    from crypto_signal_bot.backtest.strategy_event_study import (
+        StrategyEventStudyConfig,
+        strategy_event_study,
+    )
+
+    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    horizons = _parse_positive_int_csv(args.horizons, field_name="horizons")
+    min_history_bars = args.min_history_bars if args.min_history_bars is not None else settings.min_history_bars
+    if min_history_bars <= 0:
+        raise ConfigError("min-history-bars must be positive.")
+
+    store = SQLiteStore(settings.database_path)
+    if args.mock:
+        mock_limit = max(160, min_history_bars + max(horizons) + 20)
+        store.upsert_candles(make_mock_candles(args.exchange, quote, args.interval, limit=mock_limit))
+
+    symbols = store.list_symbols(args.exchange, quote, args.interval)
+    if not symbols:
+        print("No stored candles found. Run collect first or use --mock.")
+        return 1
+
+    candles_by_symbol = {
+        symbol: store.fetch_candles(args.exchange, symbol, args.interval)
+        for symbol in symbols
+    }
+    benchmark_symbol = f"{quote}-BTC" if args.exchange == "upbit" else f"BTC{quote}"
+    metrics = strategy_event_study(
+        candles_by_symbol,
+        benchmark_symbol=benchmark_symbol,
+        config=StrategyEventStudyConfig(
+            min_history_bars=min_history_bars,
+            horizons=horizons,
+        ),
+    )
+    if args.format == "json":
+        _print_json(metrics)
+    else:
+        _print_strategy_event_study_table(metrics)
+    return 0
+
+
+def _parse_positive_int_csv(value: str, *, field_name: str) -> tuple[int, ...]:
+    raw_values = [item.strip() for item in value.split(",") if item.strip()]
+    if not raw_values:
+        raise ConfigError(f"{field_name} must include at least one positive integer.")
+    parsed: list[int] = []
+    for raw_value in raw_values:
+        try:
+            parsed_value = int(raw_value)
+        except ValueError as exc:
+            raise ConfigError(f"{field_name} must contain only positive integers.") from exc
+        if parsed_value <= 0:
+            raise ConfigError(f"{field_name} must contain only positive integers.")
+        parsed.append(parsed_value)
+    return tuple(parsed)
+
+
+def _print_strategy_event_study_table(metrics: dict[str, object]) -> None:
+    print(str(metrics["research_warning"]))
+    horizons = metrics.get("horizons", [])
+    display_horizon = str(horizons[0]) if isinstance(horizons, list) and horizons else "1"
+    print(f"Variant                                Signals  H{display_horizon} Trades  H{display_horizon} Avg Return")
+    print("--------------------------------------------------------------------------")
+    signal_counts = metrics["signal_counts"]
+    variant_summaries = metrics["variant_summaries"]
+    if not isinstance(signal_counts, dict) or not isinstance(variant_summaries, dict):
+        return
+    variants = metrics.get("variants", [])
+    if not isinstance(variants, list):
+        return
+    for variant in variants:
+        variant_name = str(variant)
+        summary_by_horizon = variant_summaries.get(variant_name, {})
+        horizon_summary = summary_by_horizon.get(display_horizon, {}) if isinstance(summary_by_horizon, dict) else {}
+        trades = horizon_summary.get("trades", 0.0) if isinstance(horizon_summary, dict) else 0.0
+        average = horizon_summary.get("average_return", 0.0) if isinstance(horizon_summary, dict) else 0.0
+        print(
+            f"{variant_name:<38} {int(signal_counts.get(variant_name, 0)):>7} "
+            f"{float(trades):>10.0f} {float(average):>14.6f}"
+        )
 
 
 def _alert_test(args: argparse.Namespace, settings: Settings) -> int:

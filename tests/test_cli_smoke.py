@@ -117,6 +117,59 @@ def test_cli_strategy_scan_mock_json(tmp_path, monkeypatch, capsys) -> None:  # 
     assert "buy now" not in json.dumps(payload).lower()
 
 
+def test_cli_strategy_event_study_mock_json(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "strategy",
+            "event-study",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--horizons",
+            "1,3",
+            "--format",
+            "json",
+            "--mock",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["strategy_event_study_only"] is True
+    assert payload["closed_candle_signals_only"] is True
+    assert payload["next_open_entry_enforced"] is True
+    assert payload["notification_logic_excluded"] is True
+    assert payload["horizons"] == [1, 3]
+    assert "variant_summaries" in payload
+    assert "buy now" not in json.dumps(payload).lower()
+
+
+def test_cli_strategy_event_study_rejects_invalid_horizons(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "strategy",
+            "event-study",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--horizons",
+            "1,zero",
+            "--mock",
+        ]
+    ) == 2
+
+    assert "horizons must contain only positive integers" in capsys.readouterr().err
+
+
 def test_saved_run_includes_entry_timing_snapshots(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     db_path = tmp_path / "test.sqlite"
     monkeypatch.setenv("DATABASE_PATH", str(db_path))

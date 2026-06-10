@@ -42,6 +42,7 @@ python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --save-run
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --include-entry-timing
 python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m,30m --strategy three_tick --top 20 --format json --mock
+python -m crypto_signal_bot.cli strategy event-study --exchange binance --quote USDT --interval 5m --horizons 1,3,6,12 --format json --mock
 ```
 
 Use public live collection with conservative caps:
@@ -70,7 +71,8 @@ recommendation, not financial advice, and no order is placed.
 
 The entry timing strategy event-study utilities are diagnostic-only and keep the same closed-candle
 signal / next-candle-open entry rule. They compare strategy variants, forward horizons, benchmark
-windows, and falling-knife exclusion effects without using notification logic.
+windows, and falling-knife exclusion effects without using notification logic. The CLI entry point is
+`strategy event-study`.
 
 Notification formatting test:
 

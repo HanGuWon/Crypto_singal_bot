@@ -71,6 +71,16 @@ python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --
 The strategy scan ranks by `research_priority_score`. The original upside `score` is still included
 for transparency.
 
+Run a diagnostic strategy event study:
+
+```bash
+python -m crypto_signal_bot.cli strategy event-study --exchange binance --quote USDT --interval 5m --horizons 1,3,6,12 --format json --mock
+```
+
+The event study compares research variants across forward bar horizons. It uses closed-candle
+signals, next-candle-open diagnostic entries, benchmark windows, and falling-knife exclusion
+summaries. It is not a portfolio simulator and does not use notification logic.
+
 ## Alert Safety
 
 Upside alerts are suppressed when:
