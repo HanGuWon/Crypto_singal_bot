@@ -677,7 +677,13 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
             print(f"Saved research run {result.source_run_id}.")
 
     if args.notify:
-        _maybe_notify(result.candidates, settings, store=store, current_run_id=result.source_run_id)
+        _maybe_notify(
+            result.candidates,
+            settings,
+            store=store,
+            current_run_id=result.source_run_id,
+            quote=quote,
+        )
     return 0
 
 
@@ -2309,6 +2315,7 @@ def _maybe_notify(
     *,
     store: SQLiteStore | None = None,
     current_run_id: str | None = None,
+    quote: str | None = None,
 ) -> None:
     if not settings.notifications_enabled:
         print("Ranking completed; notifications skipped because they are disabled.")
@@ -2332,6 +2339,7 @@ def _maybe_notify(
         store,
         candidates,
         current_run_id=current_run_id,
+        quote=quote,
     )
     events = policy.evaluate(
         candidates,
@@ -2383,6 +2391,7 @@ def _previous_alert_policy_inputs(
     candidates: list[SignalCandidate],
     *,
     current_run_id: str | None,
+    quote: str | None = None,
 ) -> tuple[dict[str, float], dict[str, int], dict[str, dict[str, float]]]:
     if not candidates:
         return {}, {}, {}
@@ -2396,6 +2405,7 @@ def _previous_alert_policy_inputs(
             if row["run_id"] != current_run_id
             and row["exchange"] == exchange
             and row["interval"] == interval
+            and (quote is None or row["quote"] == quote)
         ),
         None,
     )

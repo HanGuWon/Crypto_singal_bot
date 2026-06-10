@@ -153,6 +153,7 @@ def test_outbox_list_and_drain_dry_run_exclude_terminal_rows(
 def test_previous_alert_policy_inputs_skip_current_saved_run(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "notifications.sqlite")
     _insert_research_run(store, "previous-run", "2026-01-01T00:00:00+00:00")
+    _insert_research_run(store, "wrong-quote-run", "2026-01-01T00:04:00+00:00", quote="USDC")
     _insert_research_run(store, "current-run", "2026-01-01T00:05:00+00:00")
     store.insert_feature_snapshot(
         {
@@ -166,6 +167,20 @@ def test_previous_alert_policy_inputs_skip_current_saved_run(tmp_path) -> None:
             "penalties": {},
             "risk_flags": [],
             "score_explanation": {"score": 78.0, "rank": 12},
+        }
+    )
+    store.insert_feature_snapshot(
+        {
+            "run_id": "wrong-quote-run",
+            "exchange": "binance",
+            "symbol": "BTCUSDT",
+            "interval": "15m",
+            "data_timestamp_utc": "2026-01-01T00:04:00+00:00",
+            "feature": {"ret_1h": 0.03},
+            "component_scores": {"breakout": 99.0, "volume": 99.0},
+            "penalties": {},
+            "risk_flags": [],
+            "score_explanation": {"score": 99.0, "rank": 1},
         }
     )
     store.insert_feature_snapshot(
@@ -187,6 +202,7 @@ def test_previous_alert_policy_inputs_skip_current_saved_run(tmp_path) -> None:
         store,
         [make_candidate(source_run_id="current-run")],
         current_run_id="current-run",
+        quote="USDT",
     )
 
     assert previous_scores == {"BTCUSDT": 78.0}
@@ -194,7 +210,13 @@ def test_previous_alert_policy_inputs_skip_current_saved_run(tmp_path) -> None:
     assert previous_components == {"BTCUSDT": {"breakout": 70.0, "volume": 80.0}}
 
 
-def _insert_research_run(store: SQLiteStore, run_id: str, created_at_utc: str) -> None:
+def _insert_research_run(
+    store: SQLiteStore,
+    run_id: str,
+    created_at_utc: str,
+    *,
+    quote: str = "USDT",
+) -> None:
     store.insert_research_run(
         {
             "run_id": run_id,
@@ -202,7 +224,7 @@ def _insert_research_run(store: SQLiteStore, run_id: str, created_at_utc: str) -
             "commit_sha": "test",
             "config_hash": "hash",
             "exchange": "binance",
-            "quote": "USDT",
+            "quote": quote,
             "interval": "15m",
             "data_window_start_utc": created_at_utc,
             "data_window_end_utc": created_at_utc,
