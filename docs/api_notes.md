@@ -12,7 +12,8 @@ Upbit:
 
 Upbit rate-limit handling parses `Remaining-Req` and uses the `sec` field. The deprecated `min`
 field is ignored. HTTP 429 is retried with bounded backoff. `Retry-After` may be seconds or an
-HTTP-date. HTTP 418 fails the client request.
+HTTP-date. HTTP 418 fails the client request. Server-side collectors do not send an `Origin`
+header, avoiding Upbit's stricter browser-origin polling policy.
 
 Binance:
 

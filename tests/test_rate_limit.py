@@ -28,10 +28,10 @@ class FakeResponse:
 class FakeHttpClient:
     def __init__(self, responses: list[FakeResponse]) -> None:
         self.responses = responses
-        self.calls: list[tuple[str, dict]] = []
+        self.calls: list[tuple[str, dict, dict]] = []
 
     def get(self, url: str, *, params: dict, headers: dict) -> FakeResponse:
-        self.calls.append((url, params))
+        self.calls.append((url, params, headers))
         return self.responses.pop(0)
 
 
@@ -61,6 +61,19 @@ def test_retry_after_parser_accepts_seconds_and_http_date() -> None:
     assert parse_retry_after_seconds("Thu, 01 Jan 2026 00:00:05 GMT", now_utc=now) == 5.0
     assert parse_retry_after_seconds("Thu, 01 Jan 2026 00:00:00 GMT", now_utc=now) == 0.0
     assert parse_retry_after_seconds("not-a-date", now_utc=now) is None
+
+
+def test_public_clients_do_not_send_origin_header() -> None:
+    upbit_http = FakeHttpClient([FakeResponse(200, payload=[])])
+    binance_http = FakeHttpClient([FakeResponse(200, payload={"symbols": []})])
+
+    UpbitPublicClient(http_client=upbit_http)._get("/v1/market/all", params={"is_details": "true"}, group="market")
+    BinancePublicClient(http_client=binance_http)._get("/api/v3/exchangeInfo", params={}, weight=20)
+
+    assert "Origin" not in upbit_http.calls[0][2]
+    assert "origin" not in {key.lower() for key in upbit_http.calls[0][2]}
+    assert "Origin" not in binance_http.calls[0][2]
+    assert "origin" not in {key.lower() for key in binance_http.calls[0][2]}
 
 
 def test_binance_429_retry_after_retries_then_succeeds(monkeypatch) -> None:  # type: ignore[no-untyped-def]
