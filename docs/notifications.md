@@ -23,6 +23,7 @@ AlertPolicy handles:
 - top-N entry when the candidate also meets the alert score threshold
 - score acceleration
 - breakout watch on known component threshold crossing with volume and liquidity confirmation
+- system/data/API failure events as `SYSTEM_ERROR` with CRITICAL severity; these are not trading signals
 - risk warning
 - invalidation
 - data-quality invalidation flags for previously alerted candidates

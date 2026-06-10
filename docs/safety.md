@@ -17,6 +17,8 @@ Unsafe modes fail closed during config validation. There is no live trading code
 Numeric environment values are parsed through config-owned validators, so malformed or unsafe
 threshold/rate-limit values fail with `ConfigError` before collection, scoring, or notification
 dispatch starts.
+System/data/API failure alerts use `SYSTEM_ERROR` events with CRITICAL severity and research-only
+wording. They are audit events, not buy/sell instructions.
 
 The exchange safety guard uses explicit allowlists. Unknown endpoints are rejected by default.
 Private, account, execution, funding, deposit, and withdrawal paths are not part of the client
