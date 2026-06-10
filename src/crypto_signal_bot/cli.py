@@ -4,7 +4,7 @@ import argparse
 import json
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -1067,14 +1067,6 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
     event = build_protective_exit_alert_event(signal, intent=intent, slippage=slippage, now=now)
     if args.approval_ttl_minutes <= 0:
         raise ConfigError("--approval-ttl-minutes must be positive.")
-    persistence = _persist_and_maybe_dispatch_exit_guard_event(
-        store,
-        event=event,
-        settings=settings,
-        notify=args.notify,
-        force_save=bool(args.save_event or args.request_approval),
-        now=now,
-    )
     approval_request = None
     approval_note = "not_requested"
     if args.request_approval:
@@ -1086,9 +1078,18 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
                 created_at=now,
                 ttl_minutes=args.approval_ttl_minutes,
             )
+            event = _exit_guard_event_with_approval_request(event, approval_request)
             approval_note = "created"
         else:
             approval_note = "skipped because exit guard preflight is blocked"
+    persistence = _persist_and_maybe_dispatch_exit_guard_event(
+        store,
+        event=event,
+        settings=settings,
+        notify=args.notify,
+        force_save=bool(args.save_event or args.request_approval),
+        now=now,
+    )
     event_saved = bool(persistence["event_saved"])
     delivery_audit_count = int(persistence["delivery_audit_count"])
     _print_json(
@@ -1482,6 +1483,24 @@ def _create_manual_approval_request(
         "binding_hash": binding_hash,
         "approval_scope": "protective_exit_guard_dry_run",
     }
+
+
+def _exit_guard_event_with_approval_request(
+    event: Any,
+    approval_request: dict[str, object],
+) -> Any:
+    request_id = str(approval_request["id"])
+    scope = str(approval_request["approval_scope"])
+    return replace(
+        event,
+        drivers=_unique_strings(
+            [
+                *event.drivers,
+                f"manual_approval_request:{request_id}",
+                f"approval_scope:{scope}",
+            ]
+        ),
+    )
 
 
 def _manual_approval_binding_hash(*, event: Any, intent: RiskReducingOrderIntent) -> str:

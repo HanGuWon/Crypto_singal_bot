@@ -135,7 +135,10 @@ inspection can verify the approval scope. Approval decisions re-check that the s
 payload, and binding hash still match before they are recorded. Approval requests expire, can be
 approved or rejected only with `--confirm`, and remain audit records only. Requests are not created
 when the public preflight is blocked, including when the symbol is not allowlisted. They do not
-enable private reads, live orders, sell orders, close orders, or any exchange endpoint.
+enable private reads, live orders, sell orders, close orders, or any exchange endpoint. When
+`--notify` and `--request-approval` are used together, the saved and dispatched alert event includes
+the manual approval request id in its drivers so the Discord alert can be tied back to the pending
+audit record.
 
 ## Upbit Spot Sell-Only Shape
 

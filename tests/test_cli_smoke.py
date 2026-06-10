@@ -315,7 +315,7 @@ def test_cli_exit_guard_notify_uses_discord_only_when_enabled(tmp_path, monkeypa
                 "discord",
                 "delivered",
                 "discord_webhook",
-                provider_response={"ok": True, "event_type": event.event_type},
+                provider_response={"ok": True, "event_type": event.event_type, "drivers": event.drivers},
             )
 
     class FailingTelegramNotifier:
@@ -356,14 +356,21 @@ def test_cli_exit_guard_notify_uses_discord_only_when_enabled(tmp_path, monkeypa
             "--reduce-only",
             "--mock-orderbook",
             "--notify",
+            "--request-approval",
         ]
     ) == 0
 
     payload = json.loads(capsys.readouterr().out)
+    approval_id = payload["manual_approval_request"]["id"]
     assert payload["notification_note"] == "dispatch_attempted_discord_only"
     assert payload["delivery_audit_count"] == 1
     assert payload["notification_results"][0]["channel"] == "discord"
     assert payload["notification_results"][0]["status"] == "delivered"
+    assert f"manual_approval_request:{approval_id}" in payload["alert_event"]["drivers"]
+    assert (
+        f"manual_approval_request:{approval_id}"
+        in payload["notification_results"][0]["provider_response"]["drivers"]
+    )
     assert "telegram" not in json.dumps(payload["notification_results"]).lower()
 
     store = SQLiteStore(db_path)
@@ -381,6 +388,7 @@ def test_cli_exit_guard_notify_uses_discord_only_when_enabled(tmp_path, monkeypa
 
     assert main(["exit-guard", "events", "show", payload["saved_alert_event_id"]]) == 0
     show_payload = json.loads(capsys.readouterr().out)
+    assert f"manual_approval_request:{approval_id}" in show_payload["event"]["drivers"]
     assert show_payload["notification_deliveries"][0]["channel"] == "discord"
     assert show_payload["notification_deliveries"][0]["status"] == "delivered"
 

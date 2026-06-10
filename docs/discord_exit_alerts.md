@@ -29,6 +29,7 @@ Every exit guard alert payload must include:
 - safety-block reasons, if any
 - dry-run/manual-approval/live phase label
 - audit id (`alert_event_id`) and source run id (`source_run_id`)
+- manual approval request id when `--request-approval` created a pending audit record
 - research and safety warning
 
 Required wording:
