@@ -146,8 +146,9 @@ Supported statuses are:
 
 The stochastic oscillator is used only as confirmation or invalidation evidence. It is not a
 standalone signal. `falling_knife_suppress` and `invalidated` suppress upside alerts. The strategy
-scan CLI ranks by `research_priority_score`, but it remains a research watchlist, not a trade
-instruction.
+scan CLI ranks by `research_priority_score`, and the three-tick layer uses adaptive movement
+thresholds to avoid treating tiny bearish noise as separate ticks. It remains a research watchlist,
+not a trade instruction.
 
 See `docs/strategy_three_tick_bottoming.md` for details.
 

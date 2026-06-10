@@ -35,8 +35,10 @@ These are research states, not trading instructions.
 Three-tick evidence:
 
 - Counts meaningful bearish pressure on closed candles.
-- Merges tiny bearish candles instead of over-counting noise.
-- Does not count a normal bullish-to-bearish transition unless the bearish transition is large.
+- Merges tiny bearish candles instead of over-counting noise, using an adaptive movement unit based
+  on minimum bps, ATR, and median body size.
+- Does not count a normal bullish-to-bearish transition unless the bearish transition is large
+  versus either fixed bps or recent body/range context.
 - Allows small bullish rebounds, but a large rebound resets the flow.
 - Suppresses steep unconfirmed declines as `falling_knife_suppress`.
 

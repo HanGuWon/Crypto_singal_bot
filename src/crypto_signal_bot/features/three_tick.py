@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from statistics import median
 
 from crypto_signal_bot.data.models import Candle
-from crypto_signal_bot.features.candle_patterns import body_pct, is_bearish, is_bullish
+from crypto_signal_bot.features.candle_patterns import body_pct, body_size, is_bearish, is_bullish, range_pct
+from crypto_signal_bot.features.indicators import atr
 
 
 @dataclass(frozen=True)
@@ -11,6 +13,12 @@ class ThreeTickConfig:
     max_scan_bars: int = 12
     min_bearish_body_bps: float = 5.0
     large_transition_body_bps: float = 35.0
+    large_transition_body_mult: float = 1.8
+    large_transition_range_mult: float = 1.8
+    tick_lookback_bars: int = 20
+    min_tick_move_bps: float = 12.0
+    atr_fraction: float = 0.20
+    body_fraction: float = 0.60
     reset_rebound_pct: float = 0.012
     falling_knife_drop_pct: float = 0.045
     falling_knife_bearish_ticks: int = 5
@@ -22,6 +30,8 @@ class ThreeTickState:
     bearish_tick_count: int
     recent_drop_pct: float
     small_bearish_merged: int = 0
+    insignificant_moves_merged: int = 0
+    last_tick_unit_abs: float = 0.0
     reason_codes: list[str] = field(default_factory=list)
     risk_flags: list[str] = field(default_factory=list)
     used_closed_candles: int = 0
@@ -49,10 +59,14 @@ def compute_three_tick_state(
 
     tick_count = 0
     small_merged = 0
+    insignificant_merged = 0
+    last_counted_tick_close: float | None = None
+    last_counted_tick_low: float | None = None
+    last_tick_unit_abs = 0.0
     reasons: list[str] = []
     risks: list[str] = []
 
-    for previous, candle in zip(recent, recent[1:], strict=False):
+    for offset, (previous, candle) in enumerate(zip(recent, recent[1:], strict=False), start=1):
         close_delta_pct = candle.close / previous.close - 1 if previous.close > 0 else 0.0
         if is_bullish(candle):
             if close_delta_pct > cfg.reset_rebound_pct:
@@ -61,6 +75,8 @@ def compute_three_tick_state(
                     bearish_tick_count=tick_count,
                     recent_drop_pct=recent_drop_pct,
                     small_bearish_merged=small_merged,
+                    insignificant_moves_merged=insignificant_merged,
+                    last_tick_unit_abs=last_tick_unit_abs,
                     reason_codes=_unique([*reasons, "large_bullish_rebound_reset"]),
                     risk_flags=risks,
                     used_closed_candles=len(closed),
@@ -78,13 +94,30 @@ def compute_three_tick_state(
             reasons.append("small_bearish_candle_merged")
             continue
 
-        if is_bullish(previous) and candle_body_bps < cfg.large_transition_body_bps:
+        current_index = max(0, len(closed) - len(recent) + offset)
+        prior_history = closed[:current_index]
+        current_history = closed[: current_index + 1]
+        if is_bullish(previous) and not _is_large_transition(candle, prior_history, cfg):
             reasons.append("bullish_to_bearish_transition_not_counted")
+            continue
+
+        tick_unit = _tick_unit_abs(current_history, candle, cfg)
+        last_tick_unit_abs = tick_unit
+        if not _meaningful_tick_progress(
+            candle,
+            last_counted_tick_close=last_counted_tick_close,
+            last_counted_tick_low=last_counted_tick_low,
+            tick_unit_abs=tick_unit,
+        ):
+            insignificant_merged += 1
+            reasons.append("insignificant_bearish_progress_merged")
             continue
 
         if is_bullish(previous):
             reasons.append("large_bearish_transition_counted")
         tick_count += 1
+        last_counted_tick_close = candle.close
+        last_counted_tick_low = candle.low
 
     if tick_count >= cfg.falling_knife_bearish_ticks or recent_drop_pct <= -cfg.falling_knife_drop_pct:
         risks.append("falling_knife_suppress")
@@ -93,6 +126,8 @@ def compute_three_tick_state(
             bearish_tick_count=tick_count,
             recent_drop_pct=recent_drop_pct,
             small_bearish_merged=small_merged,
+            insignificant_moves_merged=insignificant_merged,
+            last_tick_unit_abs=last_tick_unit_abs,
             reason_codes=_unique([*reasons, "steep_unconfirmed_decline"]),
             risk_flags=risks,
             used_closed_candles=len(closed),
@@ -113,9 +148,59 @@ def compute_three_tick_state(
         bearish_tick_count=tick_count,
         recent_drop_pct=recent_drop_pct,
         small_bearish_merged=small_merged,
+        insignificant_moves_merged=insignificant_merged,
+        last_tick_unit_abs=last_tick_unit_abs,
         reason_codes=_unique(reasons),
         risk_flags=risks,
         used_closed_candles=len(closed),
+    )
+
+
+def _is_large_transition(candle: Candle, history: list[Candle], cfg: ThreeTickConfig) -> bool:
+    candle_body_bps = body_pct(candle) * 10000
+    if candle_body_bps >= cfg.large_transition_body_bps:
+        return True
+    sample = [item for item in history[-cfg.tick_lookback_bars :] if item.is_closed]
+    if len(sample) < 3:
+        return False
+    median_body_pct = median([body_pct(item) for item in sample])
+    median_range_pct = median([range_pct(item) for item in sample])
+    return (
+        median_body_pct > 0
+        and body_pct(candle) >= median_body_pct * cfg.large_transition_body_mult
+    ) or (
+        median_range_pct > 0
+        and range_pct(candle) >= median_range_pct * cfg.large_transition_range_mult
+    )
+
+
+def _tick_unit_abs(history: list[Candle], candle: Candle, cfg: ThreeTickConfig) -> float:
+    sample = [item for item in history[-cfg.tick_lookback_bars :] if item.is_closed]
+    price_part = candle.close * cfg.min_tick_move_bps / 10000
+    atr_value = atr(
+        [item.high for item in sample],
+        [item.low for item in sample],
+        [item.close for item in sample],
+        14,
+    )
+    atr_part = (atr_value or 0.0) * cfg.atr_fraction
+    body_sample = [body_size(item) for item in sample if body_size(item) > 0]
+    body_part = (median(body_sample) if body_sample else 0.0) * cfg.body_fraction
+    return max(price_part, atr_part, body_part)
+
+
+def _meaningful_tick_progress(
+    candle: Candle,
+    *,
+    last_counted_tick_close: float | None,
+    last_counted_tick_low: float | None,
+    tick_unit_abs: float,
+) -> bool:
+    if last_counted_tick_close is None or last_counted_tick_low is None:
+        return True
+    return (
+        candle.close <= last_counted_tick_close - tick_unit_abs
+        or candle.low <= last_counted_tick_low - tick_unit_abs
     )
 
 

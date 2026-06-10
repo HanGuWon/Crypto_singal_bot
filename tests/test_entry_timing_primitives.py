@@ -57,6 +57,54 @@ def test_three_tick_counts_large_transition_but_not_small_transition() -> None:
     assert "bullish_to_bearish_transition_not_counted" in state.reason_codes
 
 
+def test_three_tick_merges_insignificant_bearish_progress() -> None:
+    candles = [
+        _candle(0, open_price=100, high=101, low=99, close=100.6),
+        _candle(1, open_price=100.6, high=100.8, low=99.8, close=99.8),
+        _candle(2, open_price=99.8, high=99.9, low=99.75, close=99.78),
+        _candle(3, open_price=99.78, high=99.82, low=99.72, close=99.76),
+        _candle(4, open_price=99.76, high=99.8, low=99.70, close=99.74),
+    ]
+
+    state = compute_three_tick_state(
+        candles,
+        ThreeTickConfig(
+            large_transition_body_bps=30,
+            min_bearish_body_bps=0.1,
+            falling_knife_drop_pct=0.20,
+            min_tick_move_bps=50,
+            atr_fraction=0,
+            body_fraction=0,
+        ),
+    )
+
+    assert state.bearish_tick_count == 1
+    assert state.insignificant_moves_merged == 3
+    assert "insignificant_bearish_progress_merged" in state.reason_codes
+
+
+def test_three_tick_large_transition_can_use_recent_body_and_range_context() -> None:
+    candles = [
+        _candle(0, open_price=100.00, high=100.20, low=99.90, close=100.10),
+        _candle(1, open_price=100.10, high=100.30, low=100.00, close=100.20),
+        _candle(2, open_price=100.20, high=100.40, low=100.10, close=100.30),
+        _candle(3, open_price=100.30, high=100.35, low=99.95, close=100.00),
+    ]
+
+    state = compute_three_tick_state(
+        candles,
+        ThreeTickConfig(
+            large_transition_body_bps=100,
+            large_transition_body_mult=1.8,
+            large_transition_range_mult=1.8,
+            falling_knife_drop_pct=0.20,
+        ),
+    )
+
+    assert state.bearish_tick_count == 1
+    assert "large_bearish_transition_counted" in state.reason_codes
+
+
 def test_three_tick_uses_closed_candles_only() -> None:
     candles = [
         _candle(0, open_price=100, high=101, low=99, close=100.5),
