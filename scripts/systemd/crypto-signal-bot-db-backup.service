@@ -1,0 +1,9 @@
+[Unit]
+Description=Backup Crypto Signal Bot SQLite database
+
+[Service]
+Type=oneshot
+User=crypto-signal-bot
+WorkingDirectory=/opt/crypto_signal_bot
+EnvironmentFile=/opt/crypto_signal_bot/.env
+ExecStart=/opt/crypto_signal_bot/scripts/sqlite_backup.sh

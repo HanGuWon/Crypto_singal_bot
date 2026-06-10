@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_gcp_free_tier_profile_is_conservative() -> None:
+    profile = (ROOT / "configs" / "gcp_free_tier.yaml").read_text(encoding="utf-8")
+
+    assert "enabled: false" in profile
+    assert "disable_websocket: true" in profile
+    assert "disable_dashboard: true" in profile
+    assert "disable_large_backtests: true" in profile
+    assert "max_symbols_per_exchange: 60" in profile
+    assert "max_orderbook_symbols: 10" in profile
+    assert "notifications_enabled: false" in profile
+    assert "live_trading_enabled: false" in profile
+    assert "private_api_enabled: false" in profile
+    assert "exit_guard_live_exit_enabled: false" in profile
+    assert "us-west1" in profile
+    assert "us-central1" in profile
+    assert "us-east1" in profile
+    assert "asia-northeast3" in profile
+
+
+def test_gcp_free_tier_deployment_artifacts_exist() -> None:
+    required = [
+        "Dockerfile",
+        ".dockerignore",
+        "docs/deploy_gcp_free_tier.md",
+        "scripts/sqlite_backup.sh",
+        "scripts/logrotate/crypto_signal_bot",
+        "scripts/systemd/crypto-signal-bot-collect.service",
+        "scripts/systemd/crypto-signal-bot-collect.timer",
+        "scripts/systemd/crypto-signal-bot-rank.service",
+        "scripts/systemd/crypto-signal-bot-rank.timer",
+        "scripts/systemd/crypto-signal-bot-db-backup.service",
+        "scripts/systemd/crypto-signal-bot-db-backup.timer",
+    ]
+
+    for relative_path in required:
+        assert (ROOT / relative_path).exists()
+
+
+def test_gcp_free_tier_docs_keep_safety_defaults_visible() -> None:
+    docs = (ROOT / "docs" / "deploy_gcp_free_tier.md").read_text(encoding="utf-8")
+
+    assert "LIVE_TRADING_ENABLED=false" in docs
+    assert "PRIVATE_API_ENABLED=false" in docs
+    assert "NOTIFICATIONS_ENABLED=false" in docs
+    assert "EXIT_GUARD_LIVE_EXIT_ENABLED=false" in docs
+    assert "asia-northeast3" in docs
+    assert "Always Free" in docs

@@ -1,0 +1,11 @@
+[Unit]
+Description=Crypto Signal Bot public data collection
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=crypto-signal-bot
+WorkingDirectory=/opt/crypto_signal_bot
+EnvironmentFile=/opt/crypto_signal_bot/.env
+ExecStart=/opt/crypto_signal_bot/.venv/bin/python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interval 5m --limit 200 --max-symbols 60 --with-orderbook --max-orderbook-symbols 10

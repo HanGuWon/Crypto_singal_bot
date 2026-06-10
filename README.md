@@ -142,6 +142,12 @@ research, but it does not add private exchange calls or live order submission.
 
 See `docs/protective_exit_guard.md` and `docs/discord_exit_alerts.md` for the safety boundary.
 
+## GCP Free-Tier Profile
+
+`configs/gcp_free_tier.yaml` and `docs/deploy_gcp_free_tier.md` provide a conservative VM-oriented
+deployment profile for small REST-only research runs. The profile disables WebSockets, dashboards,
+large backtests, notifications, and exit guard execution by default.
+
 ## Output Format
 
 Each candidate includes:
@@ -231,3 +237,5 @@ development.
   protective execution features.
 - Protective exit guard work is phase-1 only: docs, config defaults, and intent validation models.
   There is no live execution path.
+- GCP deployment artifacts are examples only; check current Google Cloud pricing before creating
+  resources.

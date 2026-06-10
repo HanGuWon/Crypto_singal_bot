@@ -1,0 +1,8 @@
+/opt/crypto_signal_bot/logs/*.log {
+  daily
+  rotate 7
+  compress
+  missingok
+  notifempty
+  copytruncate
+}

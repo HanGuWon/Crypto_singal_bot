@@ -1,0 +1,60 @@
+profile_name: gcp_free_tier
+enabled: false
+deployment_target: compute_engine_e2_micro
+
+free_tier_guardrails:
+  compute_engine_regions:
+    - us-west1
+    - us-central1
+    - us-east1
+  avoid_regions_for_always_free_compute:
+    - asia-northeast3
+  machine_type: e2-micro
+  boot_disk_type: pd-standard
+  boot_disk_size_gb: 30
+  monthly_outbound_transfer_warning_gb: 1
+
+runtime:
+  disable_websocket: true
+  disable_dashboard: true
+  disable_large_backtests: true
+  database_path: data/crypto_signal_bot.sqlite
+  sqlite_vacuum_days: 7
+  backup_keep_days: 7
+
+collection:
+  max_symbols_per_exchange: 60
+  max_confirmation_symbols: 15
+  max_orderbook_symbols: 10
+  orderbook_poll_seconds: 300
+  base_intervals:
+    - 5m
+    - 15m
+  confirmation_intervals:
+    - 1m
+    - 3m
+  rank_top_n: 20
+  include_entry_timing: true
+
+retention:
+  1m_days: 3
+  3m_days: 7
+  5m_days: 45
+  15m_days: 90
+  30m_days: 180
+
+notifications:
+  notifications_enabled: false
+  telegram_enabled: false
+  discord_webhook_enabled: false
+  exit_guard_discord_alerts_enabled: false
+
+safety:
+  live_trading_enabled: false
+  private_api_enabled: false
+  require_manual_approval: true
+  exit_guard_enabled: false
+  exit_guard_dry_run: true
+  exit_guard_private_read_enabled: false
+  exit_guard_live_exit_enabled: false
+  exit_guard_require_symbol_whitelist: true

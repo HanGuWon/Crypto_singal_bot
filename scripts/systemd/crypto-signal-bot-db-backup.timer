@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Crypto Signal Bot SQLite backup daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+AccuracySec=5min
+Unit=crypto-signal-bot-db-backup.service
+
+[Install]
+WantedBy=timers.target
