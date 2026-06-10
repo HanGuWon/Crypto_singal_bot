@@ -53,8 +53,10 @@ Entry timing research:
 
 Protective exit guard note:
 
-- Any future private-account or execution safety feature is out of scope for this MVP.
-- Such a feature would need a separate safety review and must not be added inside the public-data
+- Current protective exit guard work is a design foundation only.
+- It adds safe defaults and model-level validation, not exchange adapters or order submission.
+- Any future private-account or execution safety feature is out of scope for this public-data MVP.
+- Such a feature would need a separate safety review and must stay outside the public-data
   screener path.
 - The current repository contains no live trading code path.
 

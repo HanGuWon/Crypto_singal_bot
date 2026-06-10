@@ -134,6 +134,14 @@ instruction.
 
 See `docs/strategy_three_tick_bottoming.md` for details.
 
+## Protective Exit Guard Foundation
+
+The repository also contains a disabled-by-default protective exit guard design foundation. It adds
+safe config defaults and domain model validation for future sell-only / close-only risk-reduction
+research, but it does not add private exchange calls or live order submission.
+
+See `docs/protective_exit_guard.md` and `docs/discord_exit_alerts.md` for the safety boundary.
+
 ## Output Format
 
 Each candidate includes:
@@ -221,3 +229,5 @@ development.
 - Cross-exchange normalization is not implemented.
 - Entry timing logic is an MVP research overlay. It is not connected to orders, private APIs, or
   protective execution features.
+- Protective exit guard work is phase-1 only: docs, config defaults, and intent validation models.
+  There is no live execution path.

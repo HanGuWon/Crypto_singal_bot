@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,18 @@ def _parse_bool(value: Any, *, default: bool = False) -> bool:
 
 def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
+
+
+@dataclass(frozen=True)
+class ExitGuardSettings:
+    enabled: bool = False
+    dry_run: bool = True
+    private_read_enabled: bool = False
+    live_exit_enabled: bool = False
+    require_manual_approval: bool = True
+    require_symbol_whitelist: bool = True
+    discord_alerts_enabled: bool = False
+    telegram_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -71,6 +83,7 @@ class Settings:
     alert_per_symbol_max_per_hour: int = 1
     alert_safety_global_max_per_minute: int = 5
     alert_safety_per_symbol_max_per_hour: int = 3
+    exit_guard: ExitGuardSettings = field(default_factory=ExitGuardSettings)
 
     def validate_safety(self) -> None:
         if self.live_trading_enabled:
@@ -83,6 +96,27 @@ class Settings:
             raise ConfigError("TELEGRAM_ENABLED requires NOTIFICATIONS_ENABLED=true.")
         if self.discord_webhook_enabled and not self.notifications_enabled:
             raise ConfigError("DISCORD_WEBHOOK_ENABLED requires NOTIFICATIONS_ENABLED=true.")
+        if self.exit_guard.private_read_enabled:
+            raise ConfigError("EXIT_GUARD_PRIVATE_READ_ENABLED must remain false in this MVP.")
+        if self.exit_guard.live_exit_enabled:
+            raise ConfigError("EXIT_GUARD_LIVE_EXIT_ENABLED must remain false in this MVP.")
+        if not self.exit_guard.dry_run:
+            raise ConfigError("EXIT_GUARD_DRY_RUN must remain true in this MVP.")
+        if not self.exit_guard.require_manual_approval:
+            raise ConfigError("EXIT_GUARD_REQUIRE_MANUAL_APPROVAL must remain true in this MVP.")
+        if not self.exit_guard.require_symbol_whitelist:
+            raise ConfigError("EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST must remain true in this MVP.")
+        if self.exit_guard.telegram_enabled:
+            raise ConfigError("Exit guard uses Discord-only alerts; Telegram is not allowed.")
+        if self.exit_guard.discord_alerts_enabled and (
+            not self.notifications_enabled or not self.discord_webhook_enabled
+        ):
+            raise ConfigError(
+                "EXIT_GUARD_DISCORD_ALERTS_ENABLED requires NOTIFICATIONS_ENABLED=true "
+                "and DISCORD_WEBHOOK_ENABLED=true."
+            )
+        if self.exit_guard.discord_alerts_enabled and not self.discord_webhook_url:
+            raise ConfigError("EXIT_GUARD_DISCORD_ALERTS_ENABLED requires DISCORD_WEBHOOK_URL.")
 
     def validate_notification_channel(self, channel: str) -> None:
         if channel == "telegram":
@@ -141,6 +175,22 @@ def load_settings() -> Settings:
         alert_per_symbol_max_per_hour=int(_env("ALERT_PER_SYMBOL_MAX_PER_HOUR", "1")),
         alert_safety_global_max_per_minute=int(_env("ALERT_SAFETY_GLOBAL_MAX_PER_MINUTE", "5")),
         alert_safety_per_symbol_max_per_hour=int(_env("ALERT_SAFETY_PER_SYMBOL_MAX_PER_HOUR", "3")),
+        exit_guard=ExitGuardSettings(
+            enabled=_parse_bool(_env("EXIT_GUARD_ENABLED", "false")),
+            dry_run=_parse_bool(_env("EXIT_GUARD_DRY_RUN", "true"), default=True),
+            private_read_enabled=_parse_bool(_env("EXIT_GUARD_PRIVATE_READ_ENABLED", "false")),
+            live_exit_enabled=_parse_bool(_env("EXIT_GUARD_LIVE_EXIT_ENABLED", "false")),
+            require_manual_approval=_parse_bool(
+                _env("EXIT_GUARD_REQUIRE_MANUAL_APPROVAL", "true"),
+                default=True,
+            ),
+            require_symbol_whitelist=_parse_bool(
+                _env("EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST", "true"),
+                default=True,
+            ),
+            discord_alerts_enabled=_parse_bool(_env("EXIT_GUARD_DISCORD_ALERTS_ENABLED", "false")),
+            telegram_enabled=_parse_bool(_env("EXIT_GUARD_TELEGRAM_ENABLED", "false")),
+        ),
     )
     settings.validate_safety()
     return settings
