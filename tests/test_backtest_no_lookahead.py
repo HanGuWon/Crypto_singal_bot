@@ -80,6 +80,26 @@ def test_benchmark_windows_align_point_in_time() -> None:
     assert benchmark["benchmark_return"]["trades"] == 6.0
 
 
+def test_benchmark_set_diagnostics_include_btc_eth_and_missing_symbols() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {symbol: [50, 70] for symbol in candles_by_symbol}
+
+    metrics = diagnostic_event_study(
+        candles_by_symbol,
+        signal_indices,
+        benchmark_symbol="BTCUSDT",
+        benchmark_symbols=("BTCUSDT", "ETHUSDT", "MISSINGUSDT"),
+    )
+
+    benchmark_set = metrics["benchmark_set_diagnostics"]
+    assert benchmark_set["windows_aligned_point_in_time"] is True
+    assert benchmark_set["requested_symbols"] == ["BTCUSDT", "ETHUSDT", "MISSINGUSDT"]
+    assert benchmark_set["available_symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert benchmark_set["missing_symbols"] == ["MISSINGUSDT"]
+    assert benchmark_set["benchmark_return_by_symbol"]["BTCUSDT"]["trades"] == 6.0
+    assert benchmark_set["benchmark_return_by_symbol"]["ETHUSDT"]["trades"] == 6.0
+
+
 def test_diagnostic_baselines_use_same_point_in_time_windows() -> None:
     candles_by_symbol = _mock_universe(limit=100)
     signal_indices = {symbol: [50, 70] for symbol in candles_by_symbol}

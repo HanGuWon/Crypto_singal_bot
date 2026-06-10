@@ -719,6 +719,7 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
         candles_by_symbol,
         signal_indices_by_symbol,
         benchmark_symbol=benchmark_symbol,
+        benchmark_symbols=_benchmark_symbols_for_quote(args.exchange, quote),
         symbol_conditions={
             symbol: _backtest_symbol_condition(
                 store,

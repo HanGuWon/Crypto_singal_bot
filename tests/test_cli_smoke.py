@@ -782,6 +782,31 @@ def test_backtest_date_only_to_bound_is_inclusive_for_that_utc_day() -> None:
     assert len(filtered["BTCUSDT"]) == 3
 
 
+def test_cli_backtest_mock_includes_btc_eth_benchmark_set(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "backtest",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--mock",
+        ]
+    ) == 0
+
+    output = capsys.readouterr().out
+    payload = json.loads(output[: output.rfind("}") + 1])
+    benchmark_set = payload["benchmark_set_diagnostics"]
+    assert benchmark_set["requested_symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert benchmark_set["available_symbols"] == ["BTCUSDT", "ETHUSDT"]
+    assert benchmark_set["benchmark_return_by_symbol"]["BTCUSDT"]["trades"] > 0
+    assert benchmark_set["benchmark_return_by_symbol"]["ETHUSDT"]["trades"] > 0
+
+
 def test_cli_backtest_rejects_inverted_date_range(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
 

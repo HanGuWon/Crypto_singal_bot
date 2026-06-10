@@ -42,6 +42,7 @@ def diagnostic_event_study(
     signal_indices_by_symbol: dict[str, list[int]],
     *,
     benchmark_symbol: str | None = None,
+    benchmark_symbols: tuple[str, ...] | None = None,
     symbol_conditions: dict[str, dict[str, Any]] | None = None,
     assumptions_grid: list[BacktestAssumptions] | None = None,
 ) -> dict[str, object]:
@@ -66,6 +67,12 @@ def diagnostic_event_study(
             "windows_aligned_point_in_time": True,
         },
         "baseline_diagnostics": _baseline_diagnostics(candles_by_symbol, records),
+        "benchmark_set_diagnostics": _benchmark_set_diagnostics(
+            candles_by_symbol,
+            records,
+            benchmark_symbols=_benchmark_symbol_set(benchmark_symbol, benchmark_symbols),
+            assumptions=BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0),
+        ),
         "event_exposure_diagnostics": _event_exposure_diagnostics(records, base_assumptions),
         "stress_diagnostics": _stress_diagnostics(
             candles_by_symbol,
@@ -160,6 +167,51 @@ def _benchmark_records(
             continue
         output.append({**record, "symbol": benchmark_symbol, "return": ret})
     return output
+
+
+def _benchmark_symbol_set(
+    benchmark_symbol: str | None,
+    benchmark_symbols: tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    values: list[str] = []
+    if benchmark_symbol:
+        values.append(benchmark_symbol)
+    if benchmark_symbols is not None:
+        values.extend(benchmark_symbols)
+    return tuple(dict.fromkeys(value for value in values if value))
+
+
+def _benchmark_set_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    *,
+    benchmark_symbols: tuple[str, ...],
+    assumptions: BacktestAssumptions,
+) -> dict[str, object]:
+    available_symbols = [symbol for symbol in benchmark_symbols if symbol in candles_by_symbol]
+    missing_symbols = [symbol for symbol in benchmark_symbols if symbol not in candles_by_symbol]
+    return {
+        "windows_aligned_point_in_time": True,
+        "requested_symbols": list(benchmark_symbols),
+        "available_symbols": available_symbols,
+        "missing_symbols": missing_symbols,
+        "benchmark_return_by_symbol": {
+            symbol: summarize_returns([
+                record["return"]
+                for record in _benchmark_records(
+                    candles_by_symbol,
+                    records,
+                    benchmark_symbol=symbol,
+                    assumptions=assumptions,
+                )
+            ])
+            for symbol in available_symbols
+        },
+        "benchmark_notes": (
+            "Benchmark set diagnostics compare the same event windows against available benchmark symbols. "
+            "They are not execution models."
+        ),
+    }
 
 
 def _baseline_diagnostics(
