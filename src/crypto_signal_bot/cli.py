@@ -979,9 +979,54 @@ def _alert_test(args: argparse.Namespace, settings: Settings) -> int:
         print("Alert formatted; notifications skipped because NOTIFICATIONS_ENABLED=false.")
         print(format_telegram_event(event))
         return 0
-    dispatcher = NotificationDispatcher(True, _configured_notifiers(settings, channel=args.channel))
-    results = dispatcher.dispatch(events)
-    print(json.dumps([result.to_safe_dict() for result in results], indent=2))
+    notifiers = _configured_notifiers(settings, channel=args.channel)
+    if not notifiers:
+        _print_json(
+            {
+                "alert_event_id": event.alert_event_id,
+                "alert_event_ids": [alert_event.alert_event_id for alert_event in events],
+                "notification_note": f"notifications skipped because {args.channel} is disabled.",
+                "delivery_results": [],
+                "delivery_audit_count": 0,
+                "outbox_count": 0,
+            }
+        )
+        return 0
+    store = SQLiteStore(settings.database_path)
+    for alert_event in events:
+        store.insert_alert_event(alert_event)
+    now = datetime.now(tz=UTC)
+    for alert_event in events:
+        for notifier in notifiers:
+            channel = getattr(notifier, "channel", "unknown")
+            destination = notifier_destination(notifier)
+            store.insert_notification_outbox(
+                alert_event_id=alert_event.alert_event_id,
+                channel=channel,
+                destination_hash=destination_hash(channel, destination),
+                created_at_utc=now.isoformat(),
+            )
+    dispatcher = NotificationDispatcher(
+        True,
+        notifiers,
+        channel_state_store=SQLiteNotificationChannelStateStore(store),
+        outbox_store=store,
+    )
+    delivery_pairs = dispatcher.dispatch_with_events(events)
+    for pair_event, result in delivery_pairs:
+        store.insert_notification_delivery(
+            delivery_record(result, pair_event.alert_event_id, attempted_at=now)
+        )
+    _print_json(
+        {
+            "alert_event_id": event.alert_event_id,
+            "alert_event_ids": [alert_event.alert_event_id for alert_event in events],
+            "notification_note": "alert-test dispatch attempted through audited notification outbox.",
+            "delivery_results": [result.to_safe_dict() for _, result in delivery_pairs],
+            "delivery_audit_count": len(delivery_pairs),
+            "outbox_count": len(events) * len(notifiers),
+        }
+    )
     return 0
 
 

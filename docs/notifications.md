@@ -47,6 +47,8 @@ Dedupe, cooldown, and hysteresis:
 - Per-symbol notification limits cap repeated alerts per hour.
 - Safety-priority warnings use separate bounded quota from normal watchlist alerts.
 - Rate-limited events are saved with `suppressed_by_rate_limit` delivery status for audit.
+- `alert-test --channel noop` formats only; enabled Telegram/Discord `alert-test` runs persist
+  sample alert events, outbox rows, and delivery audit rows.
 - Terminal channel failures such as Telegram 401/403 and Discord 401/403/404 are quarantined in
   `notification_channel_state` until manual reset/configuration repair.
 - Provider 429 failures preserve parsed `retry_after` metadata after bounded retries are exhausted,

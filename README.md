@@ -100,6 +100,9 @@ Notification formatting test:
 python -m crypto_signal_bot.cli alert-test --channel noop
 ```
 
+When notifications and a specific channel are explicitly enabled, `alert-test` sends the sample
+research alert through the same audited outbox and delivery-log path used by ranking alerts.
+
 Protective exit guard dry-run preflight:
 
 ```bash

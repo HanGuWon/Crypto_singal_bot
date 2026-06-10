@@ -49,6 +49,55 @@ def test_cli_notify_skipped_when_disabled(tmp_path, monkeypatch, capsys) -> None
     assert "notifications skipped because they are disabled" in capsys.readouterr().out
 
 
+def test_cli_alert_test_records_audited_delivery_when_enabled(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "test-token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-1")
+
+    class FakeTelegramNotifier:
+        channel = "telegram"
+
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def destination_key(self) -> str:
+            return "chat-1:test-token"
+
+        def send(self, _event: object) -> NotificationResult:
+            return NotificationResult("telegram", "delivered", "chat-1", provider_response={"ok": True})
+
+    monkeypatch.setattr("crypto_signal_bot.cli.TelegramNotifier", FakeTelegramNotifier)
+
+    assert main(["alert-test", "--channel", "telegram"]) == 0
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["notification_note"].startswith("alert-test dispatch attempted")
+    assert payload["delivery_audit_count"] == len(payload["alert_event_ids"])
+    assert payload["outbox_count"] == len(payload["alert_event_ids"])
+    assert all(result["status"] == "delivered" for result in payload["delivery_results"])
+    assert "test-token" not in output
+
+    store = SQLiteStore(db_path)
+    event = store.fetch_alert_event(payload["alert_event_id"])
+    assert event is not None
+    with store.connect() as conn:
+        outbox_rows = conn.execute("SELECT status FROM notification_outbox").fetchall()
+        delivery_rows = conn.execute("SELECT status, channel FROM notification_deliveries").fetchall()
+    assert len(outbox_rows) == len(payload["alert_event_ids"])
+    assert len(delivery_rows) == len(payload["alert_event_ids"])
+    assert {row["status"] for row in outbox_rows} == {"delivered"}
+    assert {row["status"] for row in delivery_rows} == {"delivered"}
+    assert {row["channel"] for row in delivery_rows} == {"telegram"}
+
+
 def test_cli_exit_guard_preflight_mock_outputs_research_event(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
     _allow_exit_guard_symbols(monkeypatch)
