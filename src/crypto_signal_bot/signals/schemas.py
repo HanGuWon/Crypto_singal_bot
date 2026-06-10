@@ -21,6 +21,7 @@ class SignalCandidate:
     source_run_id: str
     is_closed_candle_signal: bool
     data_quality_status: str
+    data_freshness_seconds: float | None = None
     raw_symbol: str | None = None
     base_asset: str | None = None
     quote_asset: str | None = None
@@ -57,6 +58,7 @@ class SignalCandidate:
             "source_run_id": self.source_run_id,
             "is_closed_candle_signal": self.is_closed_candle_signal,
             "data_quality_status": self.data_quality_status,
+            "data_freshness_seconds": self.data_freshness_seconds,
             "symbol_health_status": self.symbol_health_status,
             "quarantine_reason": self.quarantine_reason,
             "history_bars_available": self.history_bars_available,

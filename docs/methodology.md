@@ -10,6 +10,7 @@ Public market data
   -> exchange/raw/base/quote symbol normalization
   -> data quality checks
   -> closed-candle feature snapshot
+  -> data freshness propagation
   -> composite scoring
   -> ranked research watchlist
   -> optional entry timing research overlay
@@ -26,6 +27,10 @@ Feature groups:
 - Relative strength: asset return minus BTC benchmark return when available.
 - Liquidity: quote volume and spread when orderbook data exists.
 - Risk: stale data, failed quality, wide spread, low liquidity, excess volatility, wick risk.
+
+Each feature snapshot carries the closed candle timestamp and freshness in seconds from the data
+quality report. Ranked candidates, alert events, and digest rows expose the same freshness value so
+research output can be audited without recomputing freshness inside notification adapters.
 
 Signals are generated only from closed candles. Backtest entries must occur after the signal candle
 close, using the next candle open in the smoke engine.

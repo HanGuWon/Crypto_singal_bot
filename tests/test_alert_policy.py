@@ -5,8 +5,11 @@ from crypto_signal_bot.alerts.policy import AlertPolicy
 
 
 def test_threshold_crossing_generates_watch_event() -> None:
-    events = AlertPolicy().evaluate([make_candidate()], previous_scores={"BTCUSDT": 70})
-    assert any(event.event_type == "SCORE_THRESHOLD_CROSSED" for event in events)
+    candidate = make_candidate(data_freshness_seconds=33.0)
+    events = AlertPolicy().evaluate([candidate], previous_scores={"BTCUSDT": 70})
+    threshold_events = [event for event in events if event.event_type == "SCORE_THRESHOLD_CROSSED"]
+    assert threshold_events
+    assert threshold_events[0].data_freshness_seconds == 33.0
 
 
 def test_stale_or_low_confidence_candidate_is_suppressed() -> None:

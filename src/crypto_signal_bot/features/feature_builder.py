@@ -23,6 +23,7 @@ class FeatureSnapshot:
     interval: str
     current_price: float
     data_timestamp_utc: str
+    data_freshness_seconds: float | None
     is_closed_candle_signal: bool
     data_quality_status: str
     data_quality_warnings: list[str]
@@ -100,6 +101,7 @@ def build_feature_snapshot(
         interval=latest.interval,
         current_price=latest.close,
         data_timestamp_utc=latest.close_time_utc.isoformat(),
+        data_freshness_seconds=quality.stale_seconds,
         is_closed_candle_signal=latest.is_closed,
         data_quality_status=quality.status,
         data_quality_warnings=quality.warnings,

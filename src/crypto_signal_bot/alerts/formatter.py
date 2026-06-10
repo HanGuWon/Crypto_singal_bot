@@ -28,22 +28,16 @@ def validate_safe_message(text: str) -> None:
 
 
 def format_telegram_event(event: AlertEvent, *, max_length: int = 4096) -> str:
-    drivers = ", ".join(event.drivers[:5]) or "mixed_evidence"
-    risks = ", ".join(event.risk_flags[:5]) or "none"
-    rank = f"#{event.rank}" if event.rank is not None else "n/a"
-    price = f"{event.current_price:.8g}" if event.current_price is not None else "n/a"
-    lines = [
-        f"<b>{escape(event.exchange.upper())} {escape(event.symbol)}</b> {escape(event.interval)}",
-        f"Event: {escape(event.event_type)} | Severity: {escape(event.severity)}",
-        f"Score: {event.score:.1f} | Confidence: {escape(event.confidence)} | Rank: {rank}",
-        f"Price: {price}",
-        f"Drivers: {escape(drivers)}",
-        f"Risk flags: {escape(risks)}",
-        f"Invalidation: {escape(event.invalidation_condition)}",
-        f"Data timestamp UTC: {escape(event.data_timestamp_utc)}",
-        RESEARCH_WARNING,
-    ]
-    text = "\n".join(lines)
+    text = _telegram_text(
+        event,
+        driver_limit=5,
+        risk_limit=5,
+        invalidation_limit=None,
+    )
+    if len(text) > max_length:
+        text = _telegram_text(event, driver_limit=3, risk_limit=3, invalidation_limit=140)
+    if len(text) > max_length:
+        text = _telegram_text(event, driver_limit=1, risk_limit=1, invalidation_limit=80)
     text = _truncate_preserving_warning(text, max_length=max_length)
     validate_safe_message(text)
     return text
@@ -67,6 +61,7 @@ def format_discord_payload(
         {"name": "Risk flags", "value": ", ".join(event.risk_flags[:5]) or "none"},
         {"name": "Invalidation", "value": event.invalidation_condition},
         {"name": "Data timestamp UTC", "value": event.data_timestamp_utc},
+        {"name": "Data freshness", "value": _format_freshness(event.data_freshness_seconds), "inline": True},
     ]
     description = RESEARCH_WARNING
     validate_safe_message(description + " " + " ".join(str(field["value"]) for field in fields))
@@ -94,6 +89,52 @@ def _truncate_preserving_warning(text: str, *, max_length: int) -> str:
     if available < 0:
         return RESEARCH_WARNING[:max_length]
     return text[:available].rstrip() + "..." + suffix
+
+
+def _telegram_text(
+    event: AlertEvent,
+    *,
+    driver_limit: int,
+    risk_limit: int,
+    invalidation_limit: int | None,
+) -> str:
+    drivers = ", ".join(event.drivers[:driver_limit]) or "mixed_evidence"
+    risks = ", ".join(event.risk_flags[:risk_limit]) or "none"
+    rank = f"#{event.rank}" if event.rank is not None else "n/a"
+    price = f"{event.current_price:.8g}" if event.current_price is not None else "n/a"
+    invalidation = _clip_text(event.invalidation_condition, invalidation_limit)
+    lines = [
+        f"<b>{escape(event.exchange.upper())} {escape(event.symbol)}</b> {escape(event.interval)}",
+        f"Event: {escape(event.event_type)} | Severity: {escape(event.severity)}",
+        f"Score: {event.score:.1f} | Confidence: {escape(event.confidence)} | Rank: {rank}",
+        f"Price: {price}",
+        f"Data timestamp UTC: {escape(event.data_timestamp_utc)}",
+        f"Data freshness: {_format_freshness(event.data_freshness_seconds)}",
+        f"Drivers: {escape(drivers)}",
+        f"Risk flags: {escape(risks)}",
+        f"Invalidation: {escape(invalidation)}",
+        RESEARCH_WARNING,
+    ]
+    return "\n".join(lines)
+
+
+def _clip_text(value: str, max_length: int | None) -> str:
+    if max_length is None or len(value) <= max_length:
+        return value
+    if max_length <= 3:
+        return value[:max_length]
+    return value[: max_length - 3].rstrip() + "..."
+
+
+def _format_freshness(seconds: float | None) -> str:
+    if seconds is None:
+        return "n/a"
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.1f}m"
+    return f"{minutes / 60:.1f}h"
 
 
 def _severity_color(severity: str) -> int:

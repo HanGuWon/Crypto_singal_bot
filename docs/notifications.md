@@ -30,6 +30,10 @@ AlertPolicy handles:
 - low-liquidity and wide-spread suppression
 - symbol quarantine and missing-benchmark suppression
 
+Alert events and formatted messages carry both `data_timestamp_utc` and `data_freshness_seconds`.
+This makes freshness visible to downstream output adapters without letting notification code affect
+scoring or ranking.
+
 Dedupe, cooldown, and hysteresis:
 
 - Dedupe keys include exchange, symbol, interval, event type, score bucket, and driver hash.
@@ -45,7 +49,8 @@ Dedupe, cooldown, and hysteresis:
   rows during dispatch.
 - Digest support is a separate disabled-by-default policy path. `DigestPolicy` can build a
   research-only digest preview with top candidates and major score changes, but it does not dispatch
-  provider messages and does not affect instant alert policy.
+  provider messages and does not affect instant alert policy. Digest rows include candidate data
+  timestamps and freshness seconds for auditability.
 
 Telegram:
 

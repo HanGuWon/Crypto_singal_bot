@@ -35,6 +35,7 @@ def make_candidate(**overrides: object) -> SignalCandidate:
         "source_run_id": str(uuid4()),
         "is_closed_candle_signal": True,
         "data_quality_status": "pass",
+        "data_freshness_seconds": 42.0,
     }
     data.update(overrides)
     return SignalCandidate(**data)
@@ -59,6 +60,7 @@ def make_alert(**overrides: object) -> AlertEvent:
         "risk_flags": candidate.risk_flags,
         "invalidation_condition": candidate.invalidation_condition,
         "data_timestamp_utc": candidate.data_timestamp_utc,
+        "data_freshness_seconds": candidate.data_freshness_seconds,
         "dedupe_key": "binance:BTCUSDT:15m:SCORE_THRESHOLD_CROSSED:85:test",
         "source_run_id": candidate.source_run_id,
     }

@@ -91,6 +91,7 @@ class ScoringEngine:
             source_run_id=source_run_id or str(uuid4()),
             is_closed_candle_signal=snapshot.is_closed_candle_signal,
             data_quality_status=snapshot.data_quality_status,
+            data_freshness_seconds=snapshot.data_freshness_seconds,
         )
 
     def explain(self, snapshot: FeatureSnapshot, candidate: SignalCandidate) -> dict[str, object]:
@@ -122,6 +123,7 @@ class ScoringEngine:
             ),
             "risk_flags": candidate.risk_flags,
             "data_quality_status": snapshot.data_quality_status,
+            "data_freshness_seconds": snapshot.data_freshness_seconds,
             "data_quality_warnings": snapshot.data_quality_warnings,
             "symbol_health_status": candidate.symbol_health_status,
             "quarantine_reason": candidate.quarantine_reason,

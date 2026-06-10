@@ -1383,6 +1383,11 @@ def _row_to_alert_event(payload: dict[str, Any]) -> AlertEvent:
         risk_flags=[str(item) for item in risk_flags],
         invalidation_condition=str(payload["invalidation_condition"]),
         data_timestamp_utc=str(payload["data_timestamp_utc"]),
+        data_freshness_seconds=(
+            None
+            if payload.get("data_freshness_seconds") is None
+            else float(payload["data_freshness_seconds"])
+        ),
         dedupe_key=str(payload["dedupe_key"]),
         source_run_id=str(payload["source_run_id"]),
         notification_status=str(payload.get("notification_status", "pending")),

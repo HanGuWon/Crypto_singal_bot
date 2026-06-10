@@ -25,6 +25,7 @@ class AlertEvent:
     data_timestamp_utc: str
     dedupe_key: str
     source_run_id: str
+    data_freshness_seconds: float | None = None
     notification_status: str = "pending"
 
     def to_dict(self) -> dict[str, Any]:
@@ -45,6 +46,7 @@ class AlertEvent:
             "risk_flags": self.risk_flags,
             "invalidation_condition": self.invalidation_condition,
             "data_timestamp_utc": self.data_timestamp_utc,
+            "data_freshness_seconds": self.data_freshness_seconds,
             "dedupe_key": self.dedupe_key,
             "source_run_id": self.source_run_id,
             "notification_status": self.notification_status,

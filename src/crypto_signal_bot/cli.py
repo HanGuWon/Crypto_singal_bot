@@ -1517,6 +1517,7 @@ def _sample_candidate() -> SignalCandidate:
         source_run_id=str(uuid4()),
         is_closed_candle_signal=True,
         data_quality_status="pass",
+        data_freshness_seconds=0.0,
     )
 
 

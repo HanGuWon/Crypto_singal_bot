@@ -289,6 +289,7 @@ class AlertPolicy:
             risk_flags=risk_flags if risk_flags is not None else candidate.risk_flags,
             invalidation_condition=candidate.invalidation_condition,
             data_timestamp_utc=candidate.data_timestamp_utc,
+            data_freshness_seconds=candidate.data_freshness_seconds,
             dedupe_key=make_dedupe_key(candidate, event_type),
             source_run_id=candidate.source_run_id,
         )

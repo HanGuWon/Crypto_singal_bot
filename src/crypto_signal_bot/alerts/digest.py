@@ -100,6 +100,7 @@ def _candidate_digest_row(candidate: SignalCandidate) -> dict[str, Any]:
         "drivers": candidate.drivers[:5],
         "risk_flags": candidate.risk_flags[:5],
         "data_timestamp_utc": candidate.data_timestamp_utc,
+        "data_freshness_seconds": candidate.data_freshness_seconds,
     }
 
 

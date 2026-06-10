@@ -177,7 +177,7 @@ Each candidate includes:
 - drivers
 - risk flags
 - invalidation condition
-- data timestamp UTC
+- data timestamp UTC and data freshness in seconds
 - source run id
 - closed-candle and data-quality status
 - symbol health status, quarantine reason, history bars available, and benchmark availability
@@ -206,6 +206,8 @@ are not blocked by earlier watchlist alerts. Terminal Telegram/Discord authoriza
 failures are quarantined in local channel state until configuration is fixed.
 Upside alerts are suppressed for quarantined symbols, stale or incomplete candle data,
 low-liquidity candidates, and candidates missing a usable benchmark.
+Telegram, Discord, and digest payloads include the candidate data timestamp plus freshness in
+seconds/minutes so stale-data decisions are visible in the research output.
 Digest support is a disabled-by-default policy placeholder that can build a research-only preview
 from top candidates and major score changes; it does not dispatch messages by itself.
 

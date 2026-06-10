@@ -29,6 +29,7 @@ def test_digest_policy_builds_top_candidates_and_major_changes() -> None:
     assert payload["notification_status"] == "not_scheduled"
     assert payload["research_warning"].startswith("Research digest only")
     assert [candidate["symbol"] for candidate in payload["top_candidates"]] == ["ETHUSDT", "BTCUSDT"]
+    assert payload["top_candidates"][0]["data_freshness_seconds"] == 42.0
     assert [change["symbol"] for change in payload["major_changes"]] == ["ALPHAUSDT", "BTCUSDT"]
 
 

@@ -369,6 +369,7 @@ def _candidate_for_backtest(candle: Candle) -> SignalCandidate:
         source_run_id=str(uuid4()),
         is_closed_candle_signal=candle.is_closed,
         data_quality_status="pass",
+        data_freshness_seconds=0.0,
     )
 
 
