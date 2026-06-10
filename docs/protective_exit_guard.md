@@ -74,12 +74,15 @@ CLI dry-run example:
 
 ```bash
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --save-event
+python -m crypto_signal_bot.cli exit-guard events list --limit 10
+python -m crypto_signal_bot.cli exit-guard events show ALERT_EVENT_ID
 ```
 
 Adding `--notify` does not send anything unless global notifications, Discord webhook notifications,
 and `EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are all enabled. Telegram remains disallowed for this
 module. Adding `--save-event` stores the generated dry-run `AlertEvent` in the local
-`alert_events` audit table.
+`alert_events` audit table, and the `events` commands read those saved research events without
+sending notifications.
 
 ## Upbit Spot Sell-Only Shape
 

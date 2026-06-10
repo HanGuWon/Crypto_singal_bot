@@ -248,6 +248,12 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Persist the dry-run protective exit AlertEvent to the local audit table.",
     )
+    events = exit_guard_sub.add_parser("events", help="Inspect saved protective exit dry-run events.")
+    events_sub = events.add_subparsers(dest="exit_guard_events_command", required=True)
+    events_list = events_sub.add_parser("list", help="List saved protective exit events.")
+    events_list.add_argument("--limit", type=int, default=20)
+    events_show = events_sub.add_parser("show", help="Show one saved protective exit event.")
+    events_show.add_argument("alert_event_id")
     return parser
 
 
@@ -777,6 +783,8 @@ def _alert_test(args: argparse.Namespace, settings: Settings) -> int:
 def _exit_guard(args: argparse.Namespace, settings: Settings) -> int:
     if args.exit_guard_command == "preflight":
         return _exit_guard_preflight(args, settings)
+    if args.exit_guard_command == "events":
+        return _exit_guard_events(args, settings)
     raise ConfigError(f"Unknown exit-guard command: {args.exit_guard_command}")
 
 
@@ -880,6 +888,56 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         }
     )
     return 0
+
+
+def _exit_guard_events(args: argparse.Namespace, settings: Settings) -> int:
+    store = SQLiteStore(settings.database_path)
+    if args.exit_guard_events_command == "list":
+        events = store.list_alert_events(event_type_prefix="PROTECTIVE_EXIT_", limit=args.limit)
+        _print_json(
+            {
+                "events": [_exit_guard_event_summary(event) for event in events],
+                "count": len(events),
+                "event_type_prefix": "PROTECTIVE_EXIT_",
+                "research_warning": (
+                    "Protective exit guard audit inspection only. Not financial advice. "
+                    "No order was placed."
+                ),
+            }
+        )
+        return 0
+    if args.exit_guard_events_command == "show":
+        event = store.fetch_alert_event(args.alert_event_id)
+        if event is None or not event.event_type.startswith("PROTECTIVE_EXIT_"):
+            print("Protective exit event not found.", file=sys.stderr)
+            return 1
+        _print_json(
+            {
+                "event": event.to_dict(),
+                "research_warning": (
+                    "Protective exit guard audit inspection only. Not financial advice. "
+                    "No order was placed."
+                ),
+            }
+        )
+        return 0
+    raise ConfigError(f"Unknown exit-guard events command: {args.exit_guard_events_command}")
+
+
+def _exit_guard_event_summary(event: Any) -> dict[str, object]:
+    return {
+        "alert_event_id": event.alert_event_id,
+        "created_at_utc": event.created_at_utc.astimezone(UTC).isoformat(),
+        "exchange": event.exchange,
+        "symbol": event.symbol,
+        "interval": event.interval,
+        "event_type": event.event_type,
+        "severity": event.severity,
+        "score": event.score,
+        "risk_flags": event.risk_flags,
+        "data_timestamp_utc": event.data_timestamp_utc,
+        "source_run_id": event.source_run_id,
+    }
 
 
 def _backtest_symbol_condition(

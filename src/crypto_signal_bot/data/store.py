@@ -1119,6 +1119,40 @@ class SQLiteStore:
             return None
         return _row_to_alert_event(json.loads(str(row["payload_json"])))
 
+    def list_alert_events(
+        self,
+        *,
+        event_type_prefix: str | None = None,
+        limit: int = 20,
+    ) -> list[AlertEvent]:
+        self.init_schema()
+        row_limit = max(0, limit)
+        if row_limit == 0:
+            return []
+        with self.connect() as conn:
+            if event_type_prefix is None:
+                rows = conn.execute(
+                    """
+                    SELECT payload_json
+                    FROM alert_events
+                    ORDER BY created_at_utc DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (row_limit,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT payload_json
+                    FROM alert_events
+                    WHERE event_type LIKE ?
+                    ORDER BY created_at_utc DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (f"{event_type_prefix}%", row_limit),
+                ).fetchall()
+        return [_row_to_alert_event(json.loads(str(row["payload_json"]))) for row in rows]
+
     def get_notification_channel_state(
         self,
         channel: str,

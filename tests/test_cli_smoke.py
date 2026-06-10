@@ -178,6 +178,18 @@ def test_cli_exit_guard_can_save_preflight_event_to_audit_table(tmp_path, monkey
     assert saved.event_type == "PROTECTIVE_EXIT_WATCH"
     assert saved.source_run_id == payload["alert_event"]["source_run_id"]
 
+    assert main(["exit-guard", "events", "list", "--limit", "5"]) == 0
+    list_payload = json.loads(capsys.readouterr().out)
+    assert list_payload["count"] == 1
+    assert list_payload["events"][0]["alert_event_id"] == payload["saved_alert_event_id"]
+    assert list_payload["events"][0]["event_type"] == "PROTECTIVE_EXIT_WATCH"
+
+    assert main(["exit-guard", "events", "show", payload["saved_alert_event_id"]]) == 0
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_payload["event"]["alert_event_id"] == payload["saved_alert_event_id"]
+    assert show_payload["event"]["event_type"].startswith("PROTECTIVE_EXIT_")
+    assert "No order was placed" in show_payload["research_warning"]
+
 
 def test_cli_rank_marks_insufficient_history(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
