@@ -20,6 +20,10 @@ class AlertPolicyConfig:
     score_threshold: float = 80.0
     exit_threshold: float = 65.0
     score_delta_threshold: float = 15.0
+    breakout_threshold: float = 75.0
+    breakout_exit_threshold: float = 60.0
+    breakout_min_volume: float = 60.0
+    breakout_min_liquidity: float = 50.0
     top_n: int = 10
     cooldown_minutes: int = 60
 
@@ -39,11 +43,13 @@ class AlertPolicy:
         *,
         previous_scores: dict[str, float] | None = None,
         previous_ranks: dict[str, int] | None = None,
+        previous_component_scores: dict[str, dict[str, float]] | None = None,
         now: datetime | None = None,
     ) -> list[AlertEvent]:
         now_utc = now or datetime.now(tz=UTC)
         previous_scores = previous_scores or {}
         previous_ranks = previous_ranks or {}
+        previous_component_scores = previous_component_scores or {}
         events: list[AlertEvent] = []
         for candidate in candidates:
             events.extend(
@@ -51,6 +57,7 @@ class AlertPolicy:
                     candidate,
                     previous_score=previous_scores.get(candidate.symbol),
                     previous_rank=previous_ranks.get(candidate.symbol),
+                    previous_components=previous_component_scores.get(candidate.symbol),
                     now=now_utc,
                 )
             )
@@ -62,6 +69,7 @@ class AlertPolicy:
         *,
         previous_score: float | None,
         previous_rank: int | None,
+        previous_components: dict[str, float] | None,
         now: datetime,
     ) -> list[AlertEvent]:
         severe_risk = has_critical_risk(candidate.risk_flags)
@@ -221,11 +229,7 @@ class AlertPolicy:
                     alerted_at_utc=now,
                 )
 
-        if (
-            candidate.component_scores.get("breakout", 0) >= 75
-            and candidate.component_scores.get("volume", 0) >= 60
-            and candidate.component_scores.get("liquidity", 0) >= 50
-        ):
+        if _breakout_watch_crossed(candidate, previous_components, self.config):
             breakout_state = self.state_store.get(
                 candidate.exchange, candidate.symbol, candidate.interval, "BREAKOUT_WATCH"
             )
@@ -243,7 +247,7 @@ class AlertPolicy:
                         dedupe_key=event.dedupe_key,
                         alerted_at_utc=now,
                     )
-        elif candidate.component_scores.get("breakout", 0) < 60:
+        elif candidate.component_scores.get("breakout", 0) < self.config.breakout_exit_threshold:
             self.state_store.set_active(
                 candidate.exchange,
                 candidate.symbol,
@@ -340,3 +344,18 @@ def _invalidation_risk_flags(candidate: SignalCandidate, exit_threshold: float) 
     elif candidate.data_quality_status != "pass":
         flags.append("data_quality_not_pass")
     return list(dict.fromkeys(flags))
+
+
+def _breakout_watch_crossed(
+    candidate: SignalCandidate,
+    previous_components: dict[str, float] | None,
+    config: AlertPolicyConfig,
+) -> bool:
+    breakout = candidate.component_scores.get("breakout", 0.0)
+    previous_breakout = None if previous_components is None else previous_components.get("breakout")
+    return (
+        breakout >= config.breakout_threshold
+        and (previous_breakout is None or previous_breakout < config.breakout_threshold)
+        and candidate.component_scores.get("volume", 0.0) >= config.breakout_min_volume
+        and candidate.component_scores.get("liquidity", 0.0) >= config.breakout_min_liquidity
+    )

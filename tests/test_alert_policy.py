@@ -65,6 +65,36 @@ def test_top_n_entry_requires_alert_score_threshold() -> None:
     assert not any(event.event_type == "TOP_N_ENTRY" for event in events)
 
 
+def test_breakout_watch_requires_component_threshold_crossing() -> None:
+    candidate = make_candidate(
+        rank=15,
+        component_scores={
+            "trend": 70.0,
+            "momentum": 70.0,
+            "volume": 70.0,
+            "liquidity": 70.0,
+            "breakout": 80.0,
+            "relative_strength": 65.0,
+            "market_regime": 55.0,
+        },
+    )
+    policy = AlertPolicy()
+
+    fresh_crossing = policy.evaluate(
+        [candidate],
+        previous_scores={"BTCUSDT": 85.0},
+        previous_component_scores={"BTCUSDT": {"breakout": 70.0}},
+    )
+    already_above = AlertPolicy().evaluate(
+        [candidate],
+        previous_scores={"BTCUSDT": 85.0},
+        previous_component_scores={"BTCUSDT": {"breakout": 80.0}},
+    )
+
+    assert any(event.event_type == "BREAKOUT_WATCH" for event in fresh_crossing)
+    assert not any(event.event_type == "BREAKOUT_WATCH" for event in already_above)
+
+
 def test_entry_timing_blocking_status_suppresses_upside_alert() -> None:
     candidate = make_candidate(
         confidence="medium",

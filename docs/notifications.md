@@ -22,7 +22,7 @@ AlertPolicy handles:
 - score threshold crossing
 - top-N entry when the candidate also meets the alert score threshold
 - score acceleration
-- breakout watch
+- breakout watch on component threshold crossing with volume and liquidity confirmation
 - risk warning
 - invalidation
 - data-quality invalidation flags for previously alerted candidates
