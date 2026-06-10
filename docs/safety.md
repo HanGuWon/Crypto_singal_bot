@@ -19,6 +19,8 @@ threshold/rate-limit values fail with `ConfigError` before collection, scoring, 
 dispatch starts.
 System/data/API failure alerts use `SYSTEM_ERROR` events with CRITICAL severity and research-only
 wording. They are audit events, not buy/sell instructions.
+CLI exchange/API failures are recorded as `SYSTEM_ERROR` alert events for auditability, without
+creating notification outbox rows or any trading action.
 
 The exchange safety guard uses explicit allowlists. Unknown endpoints are rejected by default.
 Private, account, execution, funding, deposit, and withdrawal paths are not part of the client

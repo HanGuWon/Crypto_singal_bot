@@ -19,6 +19,7 @@ from crypto_signal_bot.alerts.formatter import format_telegram_event
 from crypto_signal_bot.alerts.policy import AlertPolicy, AlertPolicyConfig
 from crypto_signal_bot.alerts.rate_limit import SQLiteNotificationRateLimiter
 from crypto_signal_bot.alerts.state import SQLiteAlertStateStore
+from crypto_signal_bot.alerts.system_events import build_system_error_event
 from crypto_signal_bot.config import ConfigError, Settings, load_settings
 from crypto_signal_bot.data.collector import make_mock_candles
 from crypto_signal_bot.data.models import (
@@ -33,7 +34,7 @@ from crypto_signal_bot.data.models import (
 from crypto_signal_bot.data.quality import assess_candles
 from crypto_signal_bot.data.store import SQLiteStore
 from crypto_signal_bot.data.symbol_health import assess_symbol_health
-from crypto_signal_bot.exchanges.base import PublicMarketDataClient
+from crypto_signal_bot.exchanges.base import ExchangeClientError, PublicMarketDataClient
 from crypto_signal_bot.exchanges.binance import BinancePublicClient
 from crypto_signal_bot.exchanges.upbit import UpbitPublicClient
 from crypto_signal_bot.exit_guard.alerts import build_protective_exit_alert_event, make_protective_exit_dedupe_key
@@ -52,7 +53,7 @@ from crypto_signal_bot.exit_guard.signals import (
 )
 from crypto_signal_bot.features.feature_builder import FeatureSnapshot, build_feature_snapshot
 from crypto_signal_bot.features.indicators import interval_to_minutes
-from crypto_signal_bot.logging_config import configure_logging
+from crypto_signal_bot.logging_config import configure_logging, redact_secrets
 from crypto_signal_bot.notifications.base import Notifier
 from crypto_signal_bot.notifications.destinations import destination_hash, notifier_destination
 from crypto_signal_bot.notifications.discord_webhook import DiscordWebhookNotifier
@@ -129,7 +130,43 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
+    except ExchangeClientError as exc:
+        event_id = _record_cli_system_error(args, settings, exc)
+        event_note = f" SYSTEM_ERROR alert_event_id={event_id}" if event_id else ""
+        print(f"Exchange/API error: {redact_secrets(exc)}.{event_note}", file=sys.stderr)
+        return 1
     return 0
+
+
+def _record_cli_system_error(
+    args: argparse.Namespace,
+    settings: Settings,
+    error: ExchangeClientError,
+) -> str | None:
+    try:
+        store = SQLiteStore(settings.database_path)
+        command = str(getattr(args, "command", "cli"))
+        exchange = str(getattr(args, "exchange", "system") or "system")
+        symbol = str(getattr(args, "symbol", None) or getattr(args, "quote", None) or "SYSTEM")
+        interval = str(
+            getattr(args, "interval", None)
+            or getattr(args, "base_interval", None)
+            or "n/a"
+        )
+        event = build_system_error_event(
+            component="cli",
+            operation=command,
+            error=error,
+            exchange=exchange,
+            symbol=symbol,
+            interval=interval,
+            source_run_id=f"cli:{command}:{uuid4()}",
+        )
+        store.insert_alert_event(event)
+        return event.alert_event_id
+    except Exception as audit_error:  # Recording a failure audit must not hide the original error.
+        print(f"Failed to record SYSTEM_ERROR event: {redact_secrets(audit_error)}", file=sys.stderr)
+        return None
 
 
 def _build_parser() -> argparse.ArgumentParser:
