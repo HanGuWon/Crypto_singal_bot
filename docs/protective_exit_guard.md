@@ -85,7 +85,9 @@ module. Adding `--save-event` stores the generated dry-run `AlertEvent` in the l
 sending notifications. If `--notify` is requested, the dry-run `AlertEvent` is persisted even when
 `--save-event` is omitted, and every delivery outcome is recorded in `notification_deliveries`.
 With default disabled notification settings this creates a skipped `noop` delivery record rather
-than contacting Discord.
+than contacting Discord. The `exit-guard events show` command returns both the saved event and the
+matching delivery audit rows, so dry-run notification behavior can be inspected without exposing
+secrets or sending an order.
 
 ## Upbit Spot Sell-Only Shape
 

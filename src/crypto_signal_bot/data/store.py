@@ -1153,6 +1153,19 @@ class SQLiteStore:
                 ).fetchall()
         return [_row_to_alert_event(json.loads(str(row["payload_json"]))) for row in rows]
 
+    def list_notification_deliveries_for_event(self, alert_event_id: str) -> list[sqlite3.Row]:
+        self.init_schema()
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT *
+                FROM notification_deliveries
+                WHERE alert_event_id=?
+                ORDER BY attempted_at_utc DESC, id DESC
+                """,
+                (alert_event_id,),
+            ).fetchall()
+
     def get_notification_channel_state(
         self,
         channel: str,

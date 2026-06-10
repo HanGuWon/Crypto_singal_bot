@@ -127,6 +127,14 @@ def test_cli_exit_guard_notify_skips_when_disabled(tmp_path, monkeypatch, capsys
     assert delivery_rows[0]["destination"] == "disabled"
     assert delivery_rows[0]["status"] == "skipped"
 
+    assert main(["exit-guard", "events", "show", payload["saved_alert_event_id"]]) == 0
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_payload["event"]["alert_event_id"] == payload["saved_alert_event_id"]
+    assert len(show_payload["notification_deliveries"]) == 1
+    assert show_payload["notification_deliveries"][0]["channel"] == "noop"
+    assert show_payload["notification_deliveries"][0]["destination"] == "disabled"
+    assert show_payload["notification_deliveries"][0]["status"] == "skipped"
+
 
 def test_cli_exit_guard_uses_configured_preflight_thresholds(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
@@ -203,6 +211,7 @@ def test_cli_exit_guard_can_save_preflight_event_to_audit_table(tmp_path, monkey
     show_payload = json.loads(capsys.readouterr().out)
     assert show_payload["event"]["alert_event_id"] == payload["saved_alert_event_id"]
     assert show_payload["event"]["event_type"].startswith("PROTECTIVE_EXIT_")
+    assert show_payload["notification_deliveries"] == []
     assert "No order was placed" in show_payload["research_warning"]
 
 

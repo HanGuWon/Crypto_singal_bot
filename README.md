@@ -107,7 +107,8 @@ are `EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30` and `EXIT_GUARD_MAX_SLIPPAGE_PCT=1
 overridden per dry-run command. `--save-event` persists the dry-run `AlertEvent` to the local audit
 table without sending a notification or placing an order. When `--notify` is used, the generated
 `AlertEvent` is also persisted for auditability and each delivery attempt, failure, or disabled
-skip is recorded in `notification_deliveries`.
+skip is recorded in `notification_deliveries`. `exit-guard events show ALERT_EVENT_ID` includes the
+saved event and its notification delivery audit rows.
 
 Database maintenance:
 

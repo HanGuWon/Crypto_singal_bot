@@ -942,6 +942,10 @@ def _exit_guard_events(args: argparse.Namespace, settings: Settings) -> int:
         _print_json(
             {
                 "event": event.to_dict(),
+                "notification_deliveries": [
+                    _notification_delivery_row_to_dict(row)
+                    for row in store.list_notification_deliveries_for_event(event.alert_event_id)
+                ],
                 "research_warning": (
                     "Protective exit guard audit inspection only. Not financial advice. "
                     "No order was placed."
@@ -965,6 +969,24 @@ def _exit_guard_event_summary(event: Any) -> dict[str, object]:
         "risk_flags": event.risk_flags,
         "data_timestamp_utc": event.data_timestamp_utc,
         "source_run_id": event.source_run_id,
+    }
+
+
+def _notification_delivery_row_to_dict(row: Any) -> dict[str, object]:
+    provider_response_json = row["provider_response_json"]
+    provider_response = json.loads(str(provider_response_json)) if provider_response_json else None
+    return {
+        "id": row["id"],
+        "alert_event_id": row["alert_event_id"],
+        "channel": row["channel"],
+        "destination": row["destination"],
+        "status": row["status"],
+        "attempted_at_utc": row["attempted_at_utc"],
+        "delivered_at_utc": row["delivered_at_utc"],
+        "error_code": row["error_code"],
+        "error_message": row["error_message"],
+        "retry_count": row["retry_count"],
+        "provider_response": provider_response,
     }
 
 
