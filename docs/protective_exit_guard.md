@@ -64,6 +64,33 @@ For sell-only spot review and close-long futures review, the preflight walks pub
 close-short futures review, it walks public asks. The result is an assessment with `pass` or
 `blocked` status, estimated slippage, filled quantity, and risk flags for audit output.
 
+## Closed-Candle Trend-Break Dry Run
+
+The phase-2 foundation can build a protective-exit research signal from public candles only. It is
+not connected to balances, positions, private exchange endpoints, or order submission. The signal
+engine ignores open candles and uses only closed candles for:
+
+- recent swing low or swing high break detection
+- EMA trend confirmation
+- ATR-scaled break distance
+- quote/base volume z-score confirmation
+- adverse move and rebound diagnostics
+- optional multi-timeframe confirmation summaries
+
+Supported dry-run states are:
+
+- `WATCHING`
+- `WARNING`
+- `EXIT_CANDIDATE`
+- `EXIT_CONFIRMED`
+- `SEVERE_EXIT_CANDIDATE`
+- `SAFETY_BLOCKED`
+
+`SAFETY_BLOCKED` is used for failed data quality, insufficient closed-candle history, or missing
+indicator history. It is a warning/audit state only and does not unlock execution. Long and spot
+exposures look for downside swing breaks. Short exposures look for upside swing breaks. These are
+risk-reduction research states, not performance claims.
+
 ## Research Alert Event Boundary
 
 The phase-1 code can convert a protective exit signal and public orderbook preflight result into a
@@ -161,4 +188,5 @@ See `docs/discord_exit_alerts.md` for the dedicated notification boundary.
 5. Manual approval flow for audit-only approvals.
 6. Limited live close-only/sell-only execution only after a separate safety review.
 
-The repository is currently in phase 1 for this module.
+The repository currently has phase 1 and the public-candle portion of phase 2. It still has no
+private read adapter, no order-test adapter, and no live execution path.

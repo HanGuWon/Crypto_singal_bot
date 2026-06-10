@@ -28,7 +28,9 @@ def build_protective_exit_alert_event(
     created_at = ensure_utc(now or datetime.now(tz=UTC))
     drivers = _drivers(signal, intent, slippage)
     risk_flags = _risk_flags(signal, slippage)
-    is_blocked = signal.state == "BLOCKED" or (slippage is not None and not slippage.passed)
+    is_blocked = signal.state in {"BLOCKED", "SAFETY_BLOCKED"} or (
+        slippage is not None and not slippage.passed
+    )
     event_type = "PROTECTIVE_EXIT_BLOCKED" if is_blocked else "PROTECTIVE_EXIT_WATCH"
     severity = "WARNING" if event_type == "PROTECTIVE_EXIT_BLOCKED" or risk_flags else "WATCH"
     data_freshness = (created_at - signal.created_at_utc).total_seconds()

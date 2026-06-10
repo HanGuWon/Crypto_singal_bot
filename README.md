@@ -189,9 +189,11 @@ See `docs/strategy_three_tick_bottoming.md` for details.
 The repository also contains a disabled-by-default protective exit guard design foundation. It adds
 safe config defaults and domain model validation for future sell-only / close-only risk-reduction
 research, plus a public orderbook slippage preflight that can block dry-run review when depth is
-missing, stale, shallow, or too costly. It can build Discord-safe research alert events for
-protective-exit review, but dispatch remains disabled by default. It does not add private exchange
-calls or live order submission.
+missing, stale, shallow, or too costly. It also includes a public-candle trend-break dry-run signal
+engine that uses closed candles only to report `WATCHING`, `WARNING`, `EXIT_CANDIDATE`,
+`EXIT_CONFIRMED`, `SEVERE_EXIT_CANDIDATE`, or `SAFETY_BLOCKED` research states. It can build
+Discord-safe research alert events for protective-exit review, but dispatch remains disabled by
+default. It does not add private exchange calls or live order submission.
 
 See `docs/protective_exit_guard.md` and `docs/discord_exit_alerts.md` for the safety boundary.
 
@@ -296,8 +298,9 @@ checking real public Upbit/Binance API behavior.
   but full cross-exchange asset mapping remains intentionally simple.
 - Entry timing logic is an MVP research overlay. It is not connected to orders, private APIs, or
   protective execution features.
-- Protective exit guard work is phase-1 only: docs, config defaults, intent validation models,
-  public orderbook preflight checks, and disabled-by-default Discord-safe alert events. There is no
-  live execution path.
+- Protective exit guard work covers the design foundation, intent validation models, public
+  orderbook preflight checks, disabled-by-default Discord-safe alert events, and public-candle
+  trend-break dry-run signals. There are still no private exchange calls, order-test adapters, or
+  live execution paths.
 - GCP deployment artifacts are examples only; check current Google Cloud pricing before creating
   resources.

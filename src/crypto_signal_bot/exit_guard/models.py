@@ -28,8 +28,10 @@ class ProtectiveExitSignal:
         object.__setattr__(self, "created_at_utc", ensure_utc(self.created_at_utc))
         if not self.is_closed_candle_signal:
             raise ExitGuardValidationError("Protective exit signals must use closed candles only.")
-        if self.data_quality_status != "pass":
-            raise ExitGuardValidationError("Protective exit signals require passing data quality.")
+        if self.data_quality_status != "pass" and self.state != "SAFETY_BLOCKED":
+            raise ExitGuardValidationError(
+                "Protective exit signals require passing data quality unless they are safety-blocked."
+            )
 
 
 @dataclass(frozen=True)

@@ -46,7 +46,9 @@ Current event types are:
 - `PROTECTIVE_EXIT_WATCH`
 - `PROTECTIVE_EXIT_BLOCKED`
 
-Blocked events are warnings for research review only. They are not execution instructions.
+Blocked events are warnings for research review only. Public-candle `SAFETY_BLOCKED` signals and
+blocked public orderbook preflights both format as `PROTECTIVE_EXIT_BLOCKED`; they are not
+execution instructions.
 
 ## Mention Safety
 

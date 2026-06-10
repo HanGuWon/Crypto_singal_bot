@@ -173,6 +173,33 @@ def test_signal_and_snapshots_validate_safety_invariants() -> None:
     assert position.position_mode == "one_way"
 
 
+def test_signal_allows_failed_quality_only_when_safety_blocked() -> None:
+    now = datetime.now(tz=UTC)
+    safety_blocked = ProtectiveExitSignal(
+        signal_id="quality-blocked",
+        created_at_utc=now,
+        exchange="binance_usdm_futures",
+        symbol="BTCUSDT",
+        interval="5m",
+        state="SAFETY_BLOCKED",
+        exit_score=0.0,
+        data_quality_status="fail",
+    )
+
+    assert safety_blocked.data_quality_status == "fail"
+    with pytest.raises(ExitGuardValidationError):
+        ProtectiveExitSignal(
+            signal_id="quality-mismatch",
+            created_at_utc=now,
+            exchange="binance_usdm_futures",
+            symbol="BTCUSDT",
+            interval="5m",
+            state="WARNING",
+            exit_score=10.0,
+            data_quality_status="fail",
+        )
+
+
 def test_order_record_remains_dry_run_without_provider_order_id() -> None:
     now = datetime.now(tz=UTC)
     intent = RiskReducingOrderIntent(
