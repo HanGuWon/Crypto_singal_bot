@@ -11,7 +11,8 @@ component scores, drivers, risk flags, confidence, timestamps, and data-quality 
 - Upbit KRW public quotation endpoints: market list, minute candles, ticker, orderbook.
 - Binance spot public market-data endpoints on `data-api.binance.vision`: exchange info, klines,
   24h ticker, depth/orderbook.
-- UTC is used internally. KST can be used for display-facing workflows later.
+- UTC is used internally. CLI JSON/table output also includes display timestamps using
+  `DISPLAY_TIMEZONE` (default `Asia/Seoul`) for KST-facing review workflows.
 
 Current endpoint choices were checked against official docs:
 
@@ -177,7 +178,7 @@ Each candidate includes:
 - drivers
 - risk flags
 - invalidation condition
-- data timestamp UTC and data freshness in seconds
+- data timestamp UTC, display timestamp/timezone, and data freshness in seconds
 - source run id
 - closed-candle and data-quality status
 - symbol health status, quarantine reason, history bars available, and benchmark availability

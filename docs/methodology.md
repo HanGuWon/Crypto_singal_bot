@@ -31,6 +31,8 @@ Feature groups:
 Each feature snapshot carries the closed candle timestamp and freshness in seconds from the data
 quality report. Ranked candidates, alert events, and digest rows expose the same freshness value so
 research output can be audited without recomputing freshness inside notification adapters.
+UTC remains the internal storage and scoring timezone; CLI output adds separate display timestamps
+using `DISPLAY_TIMEZONE` for KST-facing review workflows.
 
 Signals are generated only from closed candles. Backtest entries must occur after the signal candle
 close, using the next candle open in the smoke engine.

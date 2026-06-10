@@ -20,6 +20,7 @@ def test_default_config_is_research_only() -> None:
     assert settings.symbol_quarantine_minutes == 120
     assert settings.max_orderbook_symbols_per_collect == 10
     assert settings.orderbook_depth_limit == 20
+    assert settings.display_timezone == "Asia/Seoul"
     assert settings.exit_guard.enabled is False
     assert settings.exit_guard.dry_run is True
     assert settings.exit_guard.private_read_enabled is False
@@ -37,6 +38,11 @@ def test_unsafe_modes_fail_closed() -> None:
         Settings(private_api_enabled=True).validate_safety()
     with pytest.raises(ConfigError):
         Settings(require_manual_approval=False).validate_safety()
+
+
+def test_invalid_display_timezone_is_rejected() -> None:
+    with pytest.raises(ConfigError):
+        Settings(display_timezone="Not/A_Timezone").validate_safety()
 
 
 def test_exit_guard_unsafe_modes_fail_closed() -> None:

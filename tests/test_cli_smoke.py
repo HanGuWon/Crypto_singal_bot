@@ -10,6 +10,7 @@ from crypto_signal_bot.data.store import SQLiteStore
 
 def test_cli_collect_and_rank_mock_json(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+    monkeypatch.setenv("DISPLAY_TIMEZONE", "Asia/Seoul")
     assert main(
         ["collect", "--exchange", "binance", "--quote", "USDT", "--interval", "5m", "--limit", "80", "--mock"]
     ) == 0
@@ -20,12 +21,16 @@ def test_cli_collect_and_rank_mock_json(tmp_path, monkeypatch, capsys) -> None: 
     payload_text = output[output.find("{") :]
     payload = json.loads(payload_text)
     assert payload["research_warning"].startswith("Research watchlist only")
+    assert payload["display_timezone"] == "Asia/Seoul"
+    assert payload["generated_at_display"].endswith("+09:00")
     assert len(payload["candidates"]) <= 2
     assert "score" in payload["candidates"][0]
     assert payload["candidates"][0]["raw_symbol"] == payload["candidates"][0]["symbol"]
     assert payload["candidates"][0]["base_asset"]
     assert payload["candidates"][0]["quote_asset"] == "USDT"
     assert "data_freshness_seconds" in payload["candidates"][0]
+    assert payload["candidates"][0]["data_timestamp_display"].endswith("+09:00")
+    assert payload["candidates"][0]["data_timestamp_display_timezone"] == "Asia/Seoul"
     assert "symbol_health_status" in payload["candidates"][0]
     assert "history_bars_available" in payload["candidates"][0]
     assert "benchmark_available" in payload["candidates"][0]

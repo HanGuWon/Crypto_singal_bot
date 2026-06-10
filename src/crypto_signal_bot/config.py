@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 class ConfigError(ValueError):
@@ -86,6 +87,10 @@ class Settings:
     exit_guard: ExitGuardSettings = field(default_factory=ExitGuardSettings)
 
     def validate_safety(self) -> None:
+        try:
+            ZoneInfo(self.display_timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ConfigError("DISPLAY_TIMEZONE must be a valid IANA timezone.") from exc
         if self.live_trading_enabled:
             raise ConfigError("LIVE_TRADING_ENABLED must remain false in this MVP.")
         if self.private_api_enabled:

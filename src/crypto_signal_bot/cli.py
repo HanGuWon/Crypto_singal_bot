@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from crypto_signal_bot.alerts.channel_state import SQLiteNotificationChannelStateStore
 from crypto_signal_bot.alerts.delivery_log import delivery_record, suppressed_delivery_record
@@ -404,14 +405,19 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
         payload: dict[str, object] = {
             "source_run_id": result.source_run_id,
             "generated_at_utc": result.generated_at_utc,
+            "generated_at_display": _format_display_timestamp(
+                result.generated_at_utc,
+                settings.display_timezone,
+            ),
+            "display_timezone": settings.display_timezone,
             "research_warning": result.research_warning,
-            "candidates": [candidate.to_dict() for candidate in result.candidates],
+            "candidates": [_candidate_output_dict(candidate, settings) for candidate in result.candidates],
         }
         if args.save_run:
             payload["saved_run_id"] = result.source_run_id
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
-        _print_table(result.candidates)
+        _print_table(result.candidates, display_timezone=settings.display_timezone)
         if args.save_run:
             print(f"Saved research run {result.source_run_id}.")
 
@@ -511,17 +517,23 @@ def _strategy_scan(args: argparse.Namespace, settings: Settings) -> int:
     candidates = _rank_by_research_priority([item.candidate for item in scored], top=args.top)
     research_warning = "Research watchlist only. Not financial advice. No order was placed."
     if args.format == "json":
+        generated_at_utc = datetime.now(tz=UTC).isoformat()
         _print_json(
             {
-                "generated_at_utc": datetime.now(tz=UTC).isoformat(),
+                "generated_at_utc": generated_at_utc,
+                "generated_at_display": _format_display_timestamp(
+                    generated_at_utc,
+                    settings.display_timezone,
+                ),
+                "display_timezone": settings.display_timezone,
                 "strategy": args.strategy,
                 "timeframes": intervals,
                 "research_warning": research_warning,
-                "candidates": [candidate.to_dict() for candidate in candidates],
+                "candidates": [_candidate_output_dict(candidate, settings) for candidate in candidates],
             }
         )
     else:
-        _print_table(candidates)
+        _print_table(candidates, display_timezone=settings.display_timezone)
     return 0
 
 
@@ -1325,6 +1337,30 @@ def _print_json(payload: dict[str, object]) -> None:
     print(json.dumps(payload, indent=2, ensure_ascii=False))
 
 
+def _candidate_output_dict(candidate: SignalCandidate, settings: Settings) -> dict[str, object]:
+    data = candidate.to_dict()
+    data["data_timestamp_display"] = _format_display_timestamp(
+        candidate.data_timestamp_utc,
+        settings.display_timezone,
+    )
+    data["data_timestamp_display_timezone"] = settings.display_timezone
+    return data
+
+
+def _format_display_timestamp(timestamp_utc: str, display_timezone: str, *, compact: bool = False) -> str:
+    try:
+        display_tz = ZoneInfo(display_timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ConfigError("DISPLAY_TIMEZONE must be a valid IANA timezone.") from exc
+    parsed = datetime.fromisoformat(timestamp_utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    converted = parsed.astimezone(display_tz)
+    if compact:
+        return converted.strftime("%Y-%m-%d %H:%M %Z")
+    return converted.isoformat()
+
+
 def _research_run_row_to_dict(row: Any) -> dict[str, object]:
     return {
         "run_id": row["run_id"],
@@ -1431,12 +1467,15 @@ def _exchange_client(exchange: str, settings: Settings) -> PublicMarketDataClien
     return BinancePublicClient(settings.binance_base_url, timeout=settings.default_request_timeout_seconds)
 
 
-def _print_table(candidates: list[SignalCandidate]) -> None:
+def _print_table(candidates: list[SignalCandidate], *, display_timezone: str | None = None) -> None:
     print("Research watchlist only. Not financial advice. No order was placed.")
     include_entry = any(candidate.entry_timing_status != "not_evaluated" for candidate in candidates)
+    include_display_time = display_timezone is not None
     if Console is not None and Table is not None:
         table = Table(title="Crypto Signal Research Watchlist")
         columns = ["Rank", "Exchange", "Symbol", "Score", "Confidence", "Price"]
+        if include_display_time:
+            columns.append("Data Time")
         if include_entry:
             columns.extend(["Entry", "Priority"])
         columns.extend(["Drivers", "Risks"])
@@ -1451,6 +1490,14 @@ def _print_table(candidates: list[SignalCandidate]) -> None:
                 candidate.confidence,
                 f"{candidate.current_price:.8g}",
             ]
+            if display_timezone is not None:
+                row.append(
+                    _format_display_timestamp(
+                        candidate.data_timestamp_utc,
+                        display_timezone,
+                        compact=True,
+                    )
+                )
             if include_entry:
                 row.extend(
                     [
@@ -1483,9 +1530,18 @@ def _print_table(candidates: list[SignalCandidate]) -> None:
         print(
             f"{candidate.rank:>2} {candidate.exchange:<7} {candidate.symbol:<14} "
             f"score={candidate.score:5.1f} confidence={candidate.confidence:<6} "
-            f"price={candidate.current_price:.8g}{entry_part} drivers={','.join(candidate.drivers[:3])} "
+            f"price={candidate.current_price:.8g}"
+            f"{_table_display_time(candidate, display_timezone)}"
+            f"{entry_part} drivers={','.join(candidate.drivers[:3])} "
             f"risks={','.join(candidate.risk_flags[:3]) or 'none'}"
         )
+
+
+def _table_display_time(candidate: SignalCandidate, display_timezone: str | None) -> str:
+    if display_timezone is None:
+        return ""
+    timestamp = _format_display_timestamp(candidate.data_timestamp_utc, display_timezone, compact=True)
+    return f" data_time={timestamp}"
 
 
 def _sample_candidate() -> SignalCandidate:
