@@ -71,7 +71,9 @@ python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --
 ```
 
 The strategy scan ranks by `research_priority_score`. The original upside `score` is still included
-for transparency.
+for transparency. Strategy scans accept only the public candle intervals `1m`, `3m`, `5m`, `15m`,
+and `30m`, and the JSON output includes a `timeframe_alignment` block showing the UTC alignment
+anchor used for the requested interval set.
 
 Run a diagnostic strategy event study:
 

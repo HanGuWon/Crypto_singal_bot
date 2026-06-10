@@ -6,6 +6,7 @@ from crypto_signal_bot.data.models import Candle, DataQualityReport
 from crypto_signal_bot.features.bottoming import BottomingConfig, compute_bottoming_state
 from crypto_signal_bot.features.indicators import (
     clip_score,
+    interval_to_minutes,
     stochastic_cross_down,
     stochastic_cross_up,
     stochastic_kd,
@@ -15,6 +16,8 @@ from crypto_signal_bot.signals.risk_filters import has_critical_risk
 from crypto_signal_bot.signals.schemas import SignalCandidate
 
 ENTRY_TIMING_BLOCKING_STATUSES = {"falling_knife_suppress", "invalidated"}
+SUPPORTED_ENTRY_TIMING_INTERVALS = ("1m", "3m", "5m", "15m", "30m")
+ENTRY_TIMING_ALIGNMENT_ANCHOR_MINUTES = 30
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,57 @@ class EntryTimingResult:
     invalidation_condition: str = (
         "Entry timing research view invalidates if data becomes stale, support fails, "
         "falling-knife risk appears, or stochastic confirmation turns down."
+    )
+
+
+@dataclass(frozen=True)
+class EntryTimeframeAlignment:
+    base_interval: str
+    timeframes: tuple[str, ...]
+    anchor_minutes: int
+    supported_intervals: tuple[str, ...] = SUPPORTED_ENTRY_TIMING_INTERVALS
+    status: str = "pass"
+    reason_codes: tuple[str, ...] = (
+        "supported_public_candle_intervals",
+        "utc_epoch_minute_alignment",
+    )
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "base_interval": self.base_interval,
+            "timeframes": list(self.timeframes),
+            "anchor_minutes": self.anchor_minutes,
+            "supported_intervals": list(self.supported_intervals),
+            "reason_codes": list(self.reason_codes),
+        }
+
+
+def validate_entry_timeframe_alignment(
+    base_interval: str,
+    requested_timeframes: list[str] | tuple[str, ...] | None = None,
+) -> EntryTimeframeAlignment:
+    timeframes = _unique([base_interval, *(requested_timeframes or ())])
+    unsupported = [item for item in timeframes if item not in SUPPORTED_ENTRY_TIMING_INTERVALS]
+    if unsupported:
+        raise ValueError(
+            "Entry timing supports only aligned public candle intervals "
+            f"{', '.join(SUPPORTED_ENTRY_TIMING_INTERVALS)}; "
+            f"unsupported: {', '.join(unsupported)}."
+        )
+    minutes = [interval_to_minutes(item) for item in timeframes]
+    anchor = 1
+    for value in minutes:
+        anchor = _lcm(anchor, value)
+    if (
+        anchor > ENTRY_TIMING_ALIGNMENT_ANCHOR_MINUTES
+        or ENTRY_TIMING_ALIGNMENT_ANCHOR_MINUTES % anchor != 0
+    ):
+        raise ValueError("Entry timing timeframes must align within a 30-minute UTC anchor.")
+    return EntryTimeframeAlignment(
+        base_interval=base_interval,
+        timeframes=tuple(timeframes),
+        anchor_minutes=anchor,
     )
 
 
@@ -286,3 +340,15 @@ def apply_entry_timing_result(
 
 def _unique(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value for value in values if value))
+
+
+def _lcm(left: int, right: int) -> int:
+    if left <= 0 or right <= 0:
+        raise ValueError("Timeframe minutes must be positive.")
+    return left * right // _gcd(left, right)
+
+
+def _gcd(left: int, right: int) -> int:
+    while right:
+        left, right = right, left % right
+    return abs(left)

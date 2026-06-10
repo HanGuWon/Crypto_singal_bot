@@ -8,6 +8,7 @@ from crypto_signal_bot.signals.entry_timing import (
     EntryTimingConfig,
     EntryTimingScorer,
     apply_entry_timing_result,
+    validate_entry_timeframe_alignment,
 )
 
 
@@ -64,6 +65,24 @@ def test_apply_entry_timing_result_extends_candidate_without_replacing_score() -
     assert updated.entry_timing_status == result.status
     assert updated.entry_timing_score == result.entry_timing_score
     assert updated.research_priority_score == result.research_priority_score
+
+
+def test_entry_timeframe_alignment_accepts_supported_public_intervals() -> None:
+    alignment = validate_entry_timeframe_alignment("5m", ["15m", "30m"])
+
+    assert alignment.status == "pass"
+    assert alignment.timeframes == ("5m", "15m", "30m")
+    assert alignment.anchor_minutes == 30
+    assert "utc_epoch_minute_alignment" in alignment.reason_codes
+
+
+def test_entry_timeframe_alignment_rejects_unsupported_interval() -> None:
+    try:
+        validate_entry_timeframe_alignment("5m", ["7m"])
+    except ValueError as exc:
+        assert "unsupported: 7m" in str(exc)
+    else:  # pragma: no cover - keeps the assertion message explicit
+        raise AssertionError("Expected unsupported entry timing interval to be rejected.")
 
 
 def _fast_stochastic_config() -> EntryTimingConfig:

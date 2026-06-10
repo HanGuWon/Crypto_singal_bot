@@ -51,9 +51,11 @@ from crypto_signal_bot.notifications.noop import NoopNotifier
 from crypto_signal_bot.notifications.telegram import TelegramNotifier
 from crypto_signal_bot.research import config_hash
 from crypto_signal_bot.signals.entry_timing import (
+    EntryTimeframeAlignment,
     EntryTimingConfig,
     EntryTimingScorer,
     apply_entry_timing_result,
+    validate_entry_timeframe_alignment,
 )
 from crypto_signal_bot.signals.ranking import rank_candidates
 from crypto_signal_bot.signals.schemas import SignalCandidate
@@ -610,7 +612,8 @@ def _strategy(args: argparse.Namespace, settings: Settings) -> int:
 
 def _strategy_scan(args: argparse.Namespace, settings: Settings) -> int:
     quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
-    intervals = _strategy_timeframes(args.base_interval, args.timeframes)
+    timeframe_alignment = _strategy_timeframe_alignment(args.base_interval, args.timeframes)
+    intervals = list(timeframe_alignment.timeframes)
     store = SQLiteStore(settings.database_path)
     if args.mock:
         for interval in intervals:
@@ -644,6 +647,7 @@ def _strategy_scan(args: argparse.Namespace, settings: Settings) -> int:
                 "display_timezone": settings.display_timezone,
                 "strategy": args.strategy,
                 "timeframes": intervals,
+                "timeframe_alignment": timeframe_alignment.to_dict(),
                 "research_warning": research_warning,
                 "candidates": [_candidate_output_dict(candidate, settings) for candidate in candidates],
             }
@@ -654,10 +658,18 @@ def _strategy_scan(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _strategy_timeframes(base_interval: str, timeframes: str | None) -> list[str]:
+    return list(_strategy_timeframe_alignment(base_interval, timeframes).timeframes)
+
+
+def _strategy_timeframe_alignment(base_interval: str, timeframes: str | None) -> EntryTimeframeAlignment:
     if timeframes is None:
-        return [base_interval]
-    values = [value.strip() for value in timeframes.split(",") if value.strip()]
-    return values or [base_interval]
+        requested = [base_interval]
+    else:
+        requested = [value.strip() for value in timeframes.split(",") if value.strip()]
+    try:
+        return validate_entry_timeframe_alignment(base_interval, requested or [base_interval])
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
 
 
 def _filter_candles_by_date_range(

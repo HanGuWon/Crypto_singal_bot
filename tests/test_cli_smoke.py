@@ -516,11 +516,38 @@ def test_cli_strategy_scan_mock_json(tmp_path, monkeypatch, capsys) -> None:  # 
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["strategy"] == "three_tick"
+    assert payload["timeframe_alignment"]["status"] == "pass"
+    assert payload["timeframe_alignment"]["base_interval"] == "5m"
+    assert payload["timeframe_alignment"]["timeframes"] == ["5m", "15m"]
     assert payload["research_warning"].startswith("Research watchlist only")
     assert len(payload["candidates"]) <= 3
     assert payload["candidates"][0]["entry_strategy"] == "three_tick"
     assert payload["candidates"][0]["entry_timing_status"] != "not_evaluated"
     assert "buy now" not in json.dumps(payload).lower()
+
+
+def test_cli_strategy_scan_rejects_unsupported_timeframe(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert main(
+        [
+            "strategy",
+            "scan",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--base-interval",
+            "5m",
+            "--timeframes",
+            "5m,7m",
+            "--format",
+            "json",
+            "--mock",
+        ]
+    ) == 2
+
+    assert "unsupported: 7m" in capsys.readouterr().err
 
 
 def test_cli_strategy_event_study_mock_json(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
