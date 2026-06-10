@@ -26,6 +26,7 @@ AlertPolicy handles:
 - risk warning
 - invalidation
 - data-quality invalidation flags for previously alerted candidates
+- non-stale data-quality warning events for previously alerted candidates with warn-level quality
 - stale, missing-candle, and failed-quality suppression
 - closed-candle only suppression
 - single-extreme-component suppression

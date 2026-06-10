@@ -82,6 +82,34 @@ class AlertPolicy:
             or candidate.data_quality_status != "pass"
             or "stale_data" in candidate.risk_flags
         ):
+            warning_events: list[AlertEvent] = []
+            if _has_non_stale_data_quality_warning(candidate):
+                quality_event = self._event(
+                    candidate,
+                    "DATA_QUALITY_WARNING",
+                    "WARNING",
+                    previous_score,
+                    now,
+                    risk_flags=_data_quality_warning_risk_flags(candidate),
+                )
+                quality_state = self.state_store.get(
+                    candidate.exchange,
+                    candidate.symbol,
+                    candidate.interval,
+                    "DATA_QUALITY_WARNING",
+                )
+                if self._state_allows_event(quality_state, quality_event, now):
+                    self.state_store.set_active(
+                        candidate.exchange,
+                        candidate.symbol,
+                        candidate.interval,
+                        "DATA_QUALITY_WARNING",
+                        active=True,
+                        score=candidate.score,
+                        dedupe_key=quality_event.dedupe_key,
+                        alerted_at_utc=now,
+                    )
+                    warning_events.append(quality_event)
             event = self._event(
                 candidate,
                 "INVALIDATION",
@@ -113,12 +141,25 @@ class AlertPolicy:
                     dedupe_key=event.dedupe_key,
                     alerted_at_utc=now,
                 )
-                return [event]
-            return []
+                warning_events.append(event)
+                return warning_events
+            return warning_events
 
         risk_state = self.state_store.get(
             candidate.exchange, candidate.symbol, candidate.interval, "RISK_WARNING"
         )
+        data_quality_state = self.state_store.get(
+            candidate.exchange, candidate.symbol, candidate.interval, "DATA_QUALITY_WARNING"
+        )
+        if candidate.data_quality_status == "pass" and data_quality_state.active:
+            self.state_store.set_active(
+                candidate.exchange,
+                candidate.symbol,
+                candidate.interval,
+                "DATA_QUALITY_WARNING",
+                active=False,
+                score=candidate.score,
+            )
         if severe_risk and state.active:
             event = self._event(candidate, "RISK_WARNING", "WARNING", previous_score, now)
             if self._state_allows_event(risk_state, event, now):
@@ -344,6 +385,14 @@ def _invalidation_risk_flags(candidate: SignalCandidate, exit_threshold: float) 
     elif candidate.data_quality_status != "pass":
         flags.append("data_quality_not_pass")
     return list(dict.fromkeys(flags))
+
+
+def _has_non_stale_data_quality_warning(candidate: SignalCandidate) -> bool:
+    return candidate.data_quality_status == "warn" and "stale_data" not in candidate.risk_flags
+
+
+def _data_quality_warning_risk_flags(candidate: SignalCandidate) -> list[str]:
+    return list(dict.fromkeys([*candidate.risk_flags, "data_quality_warning"]))
 
 
 def _breakout_watch_crossed(
