@@ -35,6 +35,23 @@ def test_scoring_flags_failed_quality_as_low_confidence() -> None:
     assert candidate.confidence == "low"
 
 
+def test_scoring_flags_timestamp_drift_as_critical_risk() -> None:
+    candles = [c for c in make_mock_candles("binance", "USDT", "5m", limit=100) if c.symbol == "BTCUSDT"]
+    drifted = candles[-1].__class__(
+        **{
+            **candles[-1].__dict__,
+            "close_time_utc": candles[-1].open_time_utc + timedelta(minutes=10),
+        }
+    )
+    drifted_candles = [*candles[:-1], drifted]
+    quality = assess_candles(drifted_candles, "5m", now=datetime.now(tz=UTC) + timedelta(minutes=1))
+    snapshot = build_feature_snapshot(drifted_candles, quality=quality)
+    candidate = ScoringEngine().score(snapshot)
+
+    assert "timestamp_drift" in candidate.risk_flags
+    assert candidate.confidence == "low"
+
+
 def test_scoring_uses_configured_liquidity_threshold() -> None:
     candles = [c for c in make_mock_candles("binance", "USDT", "5m", limit=100) if c.symbol == "BTCUSDT"]
     quality = assess_candles(candles, "5m", now=datetime.now(tz=UTC) + timedelta(minutes=1))

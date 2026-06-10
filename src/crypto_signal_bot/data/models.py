@@ -136,6 +136,7 @@ class DataQualityReport:
     latest_close_time_utc: datetime | None
     missing_candle_count: int = 0
     max_gap_intervals: int = 0
+    timestamp_drift_count: int = 0
 
     @property
     def passed(self) -> bool:

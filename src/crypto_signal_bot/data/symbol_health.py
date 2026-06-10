@@ -13,6 +13,7 @@ DATA_QUALITY_QUARANTINE_WARNINGS = {
     "duplicate_candles",
     "invalid_ohlc",
     "incomplete_current_candle",
+    "timestamp_drift",
     "missing_candles",
     "stale_data",
 }

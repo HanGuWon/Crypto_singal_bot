@@ -8,6 +8,7 @@ CRITICAL_RISK_FLAGS = {
     "stale_data",
     "failed_data_quality",
     "incomplete_current_candle",
+    "timestamp_drift",
     "low_liquidity",
     "wide_spread",
     "symbol_quarantined",
@@ -34,6 +35,8 @@ def derive_risk_flags(
         flags.append("stale_data")
     if not snapshot.is_closed_candle_signal or "incomplete_current_candle" in snapshot.data_quality_warnings:
         flags.append("incomplete_current_candle")
+    if "timestamp_drift" in snapshot.data_quality_warnings:
+        flags.append("timestamp_drift")
     spread = snapshot.values.get("spread_bps")
     if spread is not None and spread > thresholds.max_spread_bps:
         flags.append("wide_spread")

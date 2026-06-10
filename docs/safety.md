@@ -22,8 +22,8 @@ interfaces.
 Data-quality quarantine:
 
 - Symbol health is stored locally for each exchange, symbol, and interval.
-- Stale candles, incomplete candles, invalid OHLCV, missing candles, warning or inactive markets,
-  and insufficient history are quarantined conservatively.
+- Stale candles, incomplete candles, invalid OHLCV, timestamp drift, missing candles, warning or
+  inactive markets, and insufficient history are quarantined conservatively.
 - Upbit can omit candles when no trade occurred. Small internal Upbit gaps are marked as
   `upbit_possible_no_trade_gap` instead of `missing_candles`; this remains a data-quality warning
   and does not create alert eligibility by itself.

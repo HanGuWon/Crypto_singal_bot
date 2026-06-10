@@ -7,6 +7,7 @@ from crypto_signal_bot.features.indicators import interval_to_minutes
 
 UPBIT_NO_TRADE_GAP_COVERAGE_FLOOR = 0.80
 UPBIT_NO_TRADE_GAP_MAX_INTERVALS = 3
+TIMESTAMP_DRIFT_TOLERANCE_SECONDS = 1.0
 
 
 def assess_candles(
@@ -42,6 +43,9 @@ def assess_candles(
         warnings.append("incomplete_current_candle")
 
     interval_seconds = interval_to_minutes(interval) * 60
+    timestamp_drift_count = _timestamp_drift_count(candles, interval_seconds)
+    if timestamp_drift_count:
+        warnings.append("timestamp_drift")
     first = min(open_times)
     last = max(open_times)
     expected = int((last - first).total_seconds() // interval_seconds) + 1
@@ -61,7 +65,13 @@ def assess_candles(
     if stale_seconds > max_staleness_seconds:
         warnings.append("stale_data")
 
-    hard_failures = {"no_candles", "duplicate_candles", "invalid_ohlc", "incomplete_current_candle"}
+    hard_failures = {
+        "no_candles",
+        "duplicate_candles",
+        "invalid_ohlc",
+        "incomplete_current_candle",
+        "timestamp_drift",
+    }
     status = "fail" if hard_failures.intersection(warnings) else "pass"
     if status == "pass" and warnings:
         status = "warn"
@@ -73,7 +83,17 @@ def assess_candles(
         latest.close_time_utc,
         missing_candle_count,
         max_gap_intervals,
+        timestamp_drift_count,
     )
+
+
+def _timestamp_drift_count(candles: list[Candle], interval_seconds: int) -> int:
+    drifted = 0
+    for candle in candles:
+        duration_seconds = (candle.close_time_utc - candle.open_time_utc).total_seconds()
+        if abs(duration_seconds - interval_seconds) > TIMESTAMP_DRIFT_TOLERANCE_SECONDS:
+            drifted += 1
+    return drifted
 
 
 def _gap_counts(open_times: list[datetime], interval_seconds: int) -> tuple[int, int]:

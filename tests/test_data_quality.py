@@ -74,3 +74,27 @@ def test_binance_internal_gap_is_marked_missing_candles() -> None:
     assert "missing_candles" in report.warnings
     assert "upbit_possible_no_trade_gap" not in report.warnings
     assert report.missing_candle_count == 1
+
+
+def test_quality_flags_timestamp_drift() -> None:
+    now = datetime.now(tz=UTC)
+    open_time = now - timedelta(minutes=5)
+    drifted = Candle(
+        "binance",
+        "BTCUSDT",
+        "1m",
+        open_time,
+        open_time + timedelta(minutes=2),
+        100,
+        101,
+        99,
+        100,
+        1,
+        100,
+    )
+
+    report = assess_candles([drifted], "1m", now=now)
+
+    assert report.status == "fail"
+    assert "timestamp_drift" in report.warnings
+    assert report.timestamp_drift_count == 1
