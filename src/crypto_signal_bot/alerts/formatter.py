@@ -32,6 +32,7 @@ def validate_safe_message(text: str) -> None:
 
 
 def format_telegram_event(event: AlertEvent, *, max_length: int = 4096) -> str:
+    manual_approval_request_id = _manual_approval_request_id(event)
     text = _telegram_text(
         event,
         driver_limit=5,
@@ -42,7 +43,11 @@ def format_telegram_event(event: AlertEvent, *, max_length: int = 4096) -> str:
         text = _telegram_text(event, driver_limit=3, risk_limit=3, invalidation_limit=140)
     if len(text) > max_length:
         text = _telegram_text(event, driver_limit=1, risk_limit=1, invalidation_limit=80)
-    text = _truncate_preserving_warning(text, max_length=max_length)
+    text = _truncate_preserving_warning(
+        text,
+        max_length=max_length,
+        manual_approval_request_id=manual_approval_request_id,
+    )
     validate_safe_message(text)
     return text
 
@@ -53,6 +58,7 @@ def format_discord_payload(
     username: str = "Crypto Signal Research Bot",
     allow_mentions: bool = False,
 ) -> dict[str, Any]:
+    manual_approval_request_id = _manual_approval_request_id(event)
     fields: list[dict[str, object]] = [
         {"name": "Score", "value": f"{event.score:.1f} ({event.confidence})", "inline": True},
         {"name": "Rank", "value": f"#{event.rank}" if event.rank is not None else "n/a", "inline": True},
@@ -69,6 +75,8 @@ def format_discord_payload(
         {"name": "Alert event id", "value": event.alert_event_id},
         {"name": "Source run id", "value": event.source_run_id},
     ]
+    if manual_approval_request_id is not None:
+        fields.append({"name": "Manual approval request id", "value": manual_approval_request_id})
     warning = _warning_text(event)
     description = warning
     validate_safe_message(description + " " + " ".join(str(field["value"]) for field in fields))
@@ -88,14 +96,23 @@ def format_discord_payload(
     return payload
 
 
-def _truncate_preserving_warning(text: str, *, max_length: int) -> str:
+def _truncate_preserving_warning(
+    text: str,
+    *,
+    max_length: int,
+    manual_approval_request_id: str | None = None,
+) -> str:
     if len(text) <= max_length:
         return text
     warning = EXIT_GUARD_WARNING if EXIT_GUARD_WARNING in text else RESEARCH_WARNING
-    suffix = "\n" + warning
+    suffix_parts = []
+    if manual_approval_request_id is not None:
+        suffix_parts.append(f"Manual approval request id: {escape(manual_approval_request_id)}")
+    suffix_parts.append(warning)
+    suffix = "\n" + "\n".join(suffix_parts)
     available = max_length - len(suffix) - 3
     if available < 0:
-        return warning[:max_length]
+        return suffix.strip()[:max_length]
     return text[:available].rstrip() + "..." + suffix
 
 
@@ -111,6 +128,7 @@ def _telegram_text(
     rank = f"#{event.rank}" if event.rank is not None else "n/a"
     price = f"{event.current_price:.8g}" if event.current_price is not None else "n/a"
     invalidation = _clip_text(event.invalidation_condition, invalidation_limit)
+    manual_approval_request_id = _manual_approval_request_id(event)
     lines = [
         f"<b>{escape(event.exchange.upper())} {escape(event.symbol)}</b> {escape(event.interval)}",
         f"Event: {escape(event.event_type)} | Severity: {escape(event.severity)}",
@@ -125,7 +143,18 @@ def _telegram_text(
         f"Invalidation: {escape(invalidation)}",
         _warning_text(event),
     ]
+    if manual_approval_request_id is not None:
+        lines.insert(-1, f"Manual approval request id: {escape(manual_approval_request_id)}")
     return "\n".join(lines)
+
+
+def _manual_approval_request_id(event: AlertEvent) -> str | None:
+    prefix = "manual_approval_request:"
+    for driver in event.drivers:
+        if driver.startswith(prefix):
+            value = driver[len(prefix) :].strip()
+            return value or None
+    return None
 
 
 def _warning_text(event: AlertEvent) -> str:

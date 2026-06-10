@@ -25,6 +25,24 @@ def test_telegram_formatter_includes_audit_ids() -> None:
     assert event.source_run_id in text
 
 
+def test_telegram_formatter_surfaces_exit_guard_manual_approval_id() -> None:
+    event = make_alert(
+        event_type="PROTECTIVE_EXIT_WATCH",
+        drivers=[
+            "driver_a",
+            "driver_b",
+            "driver_c",
+            "driver_d",
+            "driver_e",
+            "manual_approval_request:exit-approval-123",
+        ],
+    )
+
+    text = format_telegram_event(event, max_length=500)
+
+    assert "Manual approval request id: exit-approval-123" in text
+
+
 def test_discord_payload_blocks_mentions_by_default() -> None:
     event = make_alert()
     payload = format_discord_payload(event)
@@ -43,3 +61,24 @@ def test_discord_payload_blocks_mentions_by_default() -> None:
     )
     combined = str(payload).lower()
     assert all(word not in combined for word in FORBIDDEN_ALERT_WORDS)
+
+
+def test_discord_payload_surfaces_exit_guard_manual_approval_id() -> None:
+    event = make_alert(
+        event_type="PROTECTIVE_EXIT_WATCH",
+        drivers=[
+            "driver_a",
+            "driver_b",
+            "driver_c",
+            "driver_d",
+            "driver_e",
+            "manual_approval_request:exit-approval-123",
+        ],
+    )
+
+    payload = format_discord_payload(event)
+
+    assert any(
+        field["name"] == "Manual approval request id" and field["value"] == "exit-approval-123"
+        for field in payload["embeds"][0]["fields"]
+    )
