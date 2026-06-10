@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from crypto_signal_bot.cli import _filter_candles_by_date_range, main
 from crypto_signal_bot.data.collector import make_mock_candles
 from crypto_signal_bot.data.store import SQLiteStore
+from crypto_signal_bot.notifications.base import NotificationResult
 
 
 def test_cli_collect_and_rank_mock_json(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
@@ -134,6 +135,100 @@ def test_cli_exit_guard_notify_skips_when_disabled(tmp_path, monkeypatch, capsys
     assert show_payload["notification_deliveries"][0]["channel"] == "noop"
     assert show_payload["notification_deliveries"][0]["destination"] == "disabled"
     assert show_payload["notification_deliveries"][0]["status"] == "skipped"
+
+
+def test_cli_exit_guard_notify_uses_discord_only_when_enabled(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    class FakeDiscordNotifier:
+        channel = "discord"
+
+        def __init__(
+            self,
+            *,
+            webhook_url: str,
+            username: str = "",
+            thread_id: str = "",
+            allow_mentions: bool = False,
+        ) -> None:
+            self.webhook_url = webhook_url
+            self.username = username
+            self.thread_id = thread_id
+            self.allow_mentions = allow_mentions
+
+        def destination_key(self) -> str:
+            return self.webhook_url
+
+        def send(self, event) -> NotificationResult:  # type: ignore[no-untyped-def]
+            return NotificationResult(
+                "discord",
+                "delivered",
+                "discord_webhook",
+                provider_response={"ok": True, "event_type": event.event_type},
+            )
+
+    class FailingTelegramNotifier:
+        def __init__(self, *args, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            raise AssertionError("Exit guard must not instantiate TelegramNotifier.")
+
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
+    monkeypatch.setenv("DISCORD_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1/secret-token")
+    monkeypatch.setenv("EXIT_GUARD_DISCORD_ALERTS_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_ENABLED", "true")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-secret")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat-1")
+    monkeypatch.setattr("crypto_signal_bot.cli.DiscordWebhookNotifier", FakeDiscordNotifier)
+    monkeypatch.setattr("crypto_signal_bot.cli.TelegramNotifier", FailingTelegramNotifier)
+
+    assert main(
+        [
+            "exit-guard",
+            "preflight",
+            "--exchange",
+            "binance_usdm_futures",
+            "--symbol",
+            "BTCUSDT",
+            "--action",
+            "close_long",
+            "--side",
+            "SELL",
+            "--quantity",
+            "2",
+            "--position-mode",
+            "one_way",
+            "--position-side",
+            "BOTH",
+            "--reduce-only",
+            "--mock-orderbook",
+            "--notify",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["notification_note"] == "dispatch_attempted_discord_only"
+    assert payload["delivery_audit_count"] == 1
+    assert payload["notification_results"][0]["channel"] == "discord"
+    assert payload["notification_results"][0]["status"] == "delivered"
+    assert "telegram" not in json.dumps(payload["notification_results"]).lower()
+
+    store = SQLiteStore(db_path)
+    with store.connect() as conn:
+        outbox_rows = conn.execute("SELECT * FROM notification_outbox").fetchall()
+        delivery_rows = conn.execute("SELECT * FROM notification_deliveries").fetchall()
+    assert len(outbox_rows) == 1
+    assert outbox_rows[0]["channel"] == "discord"
+    assert outbox_rows[0]["status"] == "delivered"
+    assert "secret-token" not in outbox_rows[0]["destination_hash"]
+    assert len(delivery_rows) == 1
+    assert delivery_rows[0]["channel"] == "discord"
+    assert delivery_rows[0]["status"] == "delivered"
+    assert "secret-token" not in delivery_rows[0]["destination"]
+
+    assert main(["exit-guard", "events", "show", payload["saved_alert_event_id"]]) == 0
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_payload["notification_deliveries"][0]["channel"] == "discord"
+    assert show_payload["notification_deliveries"][0]["status"] == "delivered"
 
 
 def test_cli_exit_guard_uses_configured_preflight_thresholds(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
