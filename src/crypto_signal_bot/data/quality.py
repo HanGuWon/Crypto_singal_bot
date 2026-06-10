@@ -5,6 +5,9 @@ from datetime import datetime
 from crypto_signal_bot.data.models import Candle, DataQualityReport, ensure_utc, utc_now
 from crypto_signal_bot.features.indicators import interval_to_minutes
 
+UPBIT_NO_TRADE_GAP_COVERAGE_FLOOR = 0.80
+UPBIT_NO_TRADE_GAP_MAX_INTERVALS = 3
+
 
 def assess_candles(
     candles: list[Candle],
@@ -42,9 +45,17 @@ def assess_candles(
     first = min(open_times)
     last = max(open_times)
     expected = int((last - first).total_seconds() // interval_seconds) + 1
-    coverage = min(len(set(open_times)) / max(expected, 1), 1.0)
+    unique_open_times = sorted(set(open_times))
+    missing_candle_count, max_gap_intervals = _gap_counts(unique_open_times, interval_seconds)
+    coverage = min(len(unique_open_times) / max(expected, 1), 1.0)
     if coverage < 0.95:
-        warnings.append("missing_candles")
+        warnings.append(
+            _missing_candle_warning(
+                candles,
+                coverage=coverage,
+                max_gap_intervals=max_gap_intervals,
+            )
+        )
 
     stale_seconds = (now_utc - latest.close_time_utc).total_seconds()
     if stale_seconds > max_staleness_seconds:
@@ -54,4 +65,39 @@ def assess_candles(
     status = "fail" if hard_failures.intersection(warnings) else "pass"
     if status == "pass" and warnings:
         status = "warn"
-    return DataQualityReport(status, warnings, coverage, stale_seconds, latest.close_time_utc)
+    return DataQualityReport(
+        status,
+        warnings,
+        coverage,
+        stale_seconds,
+        latest.close_time_utc,
+        missing_candle_count,
+        max_gap_intervals,
+    )
+
+
+def _gap_counts(open_times: list[datetime], interval_seconds: int) -> tuple[int, int]:
+    missing = 0
+    max_gap = 0
+    for previous, current in zip(open_times, open_times[1:], strict=False):
+        intervals_between = int((current - previous).total_seconds() // interval_seconds)
+        missing_between = max(0, intervals_between - 1)
+        missing += missing_between
+        max_gap = max(max_gap, missing_between)
+    return missing, max_gap
+
+
+def _missing_candle_warning(
+    candles: list[Candle],
+    *,
+    coverage: float,
+    max_gap_intervals: int,
+) -> str:
+    exchanges = {candle.exchange for candle in candles}
+    if (
+        exchanges == {"upbit"}
+        and coverage >= UPBIT_NO_TRADE_GAP_COVERAGE_FLOOR
+        and max_gap_intervals <= UPBIT_NO_TRADE_GAP_MAX_INTERVALS
+    ):
+        return "upbit_possible_no_trade_gap"
+    return "missing_candles"

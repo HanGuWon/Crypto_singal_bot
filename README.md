@@ -56,6 +56,8 @@ python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interv
 Collection stores closed public candles and 24h ticker snapshots by default. Shallow orderbook
 snapshots are opt-in with `--with-orderbook` and capped by `--max-orderbook-symbols` to avoid
 expensive polling loops.
+For Upbit, small internal candle gaps can be marked as `upbit_possible_no_trade_gap` because Upbit
+may omit intervals with no trades. This is still a data-quality warning, not an alert trigger.
 
 Backtest smoke check:
 

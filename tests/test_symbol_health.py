@@ -84,6 +84,30 @@ def test_malformed_candle_quarantines_symbol() -> None:
     assert health.quarantine_reason == "invalid_ohlc"
 
 
+def test_upbit_possible_no_trade_gap_does_not_quarantine_symbol() -> None:
+    candles = [
+        candle
+        for index, candle in enumerate(_upbit_symbol_candles(limit=100))
+        if index not in {15, 30, 45, 60, 75, 90}
+    ]
+    quality = assess_candles(candles, "5m", now=_after_latest(candles))
+
+    health = assess_symbol_health(
+        exchange="upbit",
+        symbol="KRW-BTC",
+        interval="5m",
+        candles=candles,
+        quality=quality,
+        min_history_bars=80,
+    )
+
+    assert quality.status == "warn"
+    assert quality.warnings == ["upbit_possible_no_trade_gap"]
+    assert health.status == "healthy"
+    assert health.quarantine_reason is None
+    assert health.last_good_candle_utc == quality.latest_close_time_utc
+
+
 def test_quarantine_expiry_allows_recovery() -> None:
     candles = _symbol_candles(limit=100)
     now = _after_latest(candles)
@@ -144,6 +168,14 @@ def _symbol_candles(limit: int):
         candle
         for candle in make_mock_candles("binance", "USDT", "5m", limit=limit)
         if candle.symbol == "BTCUSDT"
+    ]
+
+
+def _upbit_symbol_candles(limit: int):
+    return [
+        candle
+        for candle in make_mock_candles("upbit", "KRW", "5m", limit=limit)
+        if candle.symbol == "KRW-BTC"
     ]
 
 

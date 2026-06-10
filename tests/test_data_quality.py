@@ -6,11 +6,17 @@ from crypto_signal_bot.data.models import Candle
 from crypto_signal_bot.data.quality import assess_candles
 
 
-def _candle(index: int, *, now: datetime) -> Candle:
+def _candle(
+    index: int,
+    *,
+    now: datetime,
+    exchange: str = "binance",
+    symbol: str = "BTCUSDT",
+) -> Candle:
     open_time = now - timedelta(minutes=10 - index)
     return Candle(
-        "binance",
-        "BTCUSDT",
+        exchange,
+        symbol,
         "1m",
         open_time,
         open_time + timedelta(minutes=1),
@@ -39,3 +45,32 @@ def test_quality_flags_stale_data() -> None:
     now = datetime.now(tz=UTC)
     report = assess_candles([_candle(1, now=now)], "1m", now=now + timedelta(hours=2))
     assert "stale_data" in report.warnings
+
+
+def test_upbit_small_internal_gap_is_marked_possible_no_trade_gap() -> None:
+    now = datetime.now(tz=UTC)
+    candles = [
+        _candle(index, now=now, exchange="upbit", symbol="KRW-LOWVOL")
+        for index in range(10)
+        if index != 4
+    ]
+
+    report = assess_candles(candles, "1m", now=now + timedelta(minutes=1))
+
+    assert report.status == "warn"
+    assert "upbit_possible_no_trade_gap" in report.warnings
+    assert "missing_candles" not in report.warnings
+    assert report.missing_candle_count == 1
+    assert report.max_gap_intervals == 1
+
+
+def test_binance_internal_gap_is_marked_missing_candles() -> None:
+    now = datetime.now(tz=UTC)
+    candles = [_candle(index, now=now) for index in range(10) if index != 4]
+
+    report = assess_candles(candles, "1m", now=now + timedelta(minutes=1))
+
+    assert report.status == "warn"
+    assert "missing_candles" in report.warnings
+    assert "upbit_possible_no_trade_gap" not in report.warnings
+    assert report.missing_candle_count == 1

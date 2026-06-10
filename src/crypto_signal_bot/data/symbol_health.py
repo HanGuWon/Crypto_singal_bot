@@ -17,6 +17,10 @@ DATA_QUALITY_QUARANTINE_WARNINGS = {
     "stale_data",
 }
 
+DATA_QUALITY_OBSERVATION_WARNINGS = {
+    "upbit_possible_no_trade_gap",
+}
+
 
 def assess_symbol_health(
     *,
@@ -35,7 +39,11 @@ def assess_symbol_health(
     now_utc = ensure_utc(now or utc_now())
     first_seen = previous.first_seen_utc if previous is not None else now_utc
     closed = [candle for candle in candles if candle.is_closed]
-    last_good = quality.latest_close_time_utc if quality.status == "pass" else None
+    last_good = (
+        quality.latest_close_time_utc
+        if quality.status == "pass" or set(quality.warnings).issubset(DATA_QUALITY_OBSERVATION_WARNINGS)
+        else None
+    )
     if last_good is None and previous is not None:
         last_good = previous.last_good_candle_utc
 
