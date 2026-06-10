@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from crypto_signal_bot.exchanges.base import ExchangeClientError, ExchangeRateLimitError
 from crypto_signal_bot.exchanges.binance import BinancePublicClient, binance_depth_request_weight
-from crypto_signal_bot.exchanges.rate_limit import BinanceWeightLimiter, RetryPolicy, parse_upbit_remaining_req
+from crypto_signal_bot.exchanges.rate_limit import (
+    BinanceWeightLimiter,
+    RetryPolicy,
+    parse_retry_after_seconds,
+    parse_upbit_remaining_req,
+)
 from crypto_signal_bot.exchanges.upbit import UpbitPublicClient
 
 
@@ -45,6 +52,15 @@ def test_binance_depth_weight_depends_on_limit() -> None:
     assert binance_depth_request_weight(500) == 25
     assert binance_depth_request_weight(1000) == 50
     assert binance_depth_request_weight(5000) == 250
+
+
+def test_retry_after_parser_accepts_seconds_and_http_date() -> None:
+    now = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
+
+    assert parse_retry_after_seconds("2.5", now_utc=now) == 2.5
+    assert parse_retry_after_seconds("Thu, 01 Jan 2026 00:00:05 GMT", now_utc=now) == 5.0
+    assert parse_retry_after_seconds("Thu, 01 Jan 2026 00:00:00 GMT", now_utc=now) == 0.0
+    assert parse_retry_after_seconds("not-a-date", now_utc=now) is None
 
 
 def test_binance_429_retry_after_retries_then_succeeds(monkeypatch) -> None:  # type: ignore[no-untyped-def]

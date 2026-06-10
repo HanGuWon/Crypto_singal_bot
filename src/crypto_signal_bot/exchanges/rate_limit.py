@@ -3,6 +3,8 @@ from __future__ import annotations
 import random
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 
 
 def parse_upbit_remaining_req(header: str | None) -> tuple[str | None, int | None]:
@@ -21,6 +23,23 @@ def parse_upbit_remaining_req(header: str | None) -> tuple[str | None, int | Non
     except ValueError:
         sec = None
     return group, sec
+
+
+def parse_retry_after_seconds(value: str | None, *, now_utc: datetime | None = None) -> float | None:
+    if value is None:
+        return None
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        retry_at = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=UTC)
+    now = now_utc or datetime.now(tz=UTC)
+    return max(0.0, (retry_at.astimezone(UTC) - now).total_seconds())
 
 
 @dataclass

@@ -13,7 +13,7 @@ from crypto_signal_bot.data.models import (
     utc_now,
 )
 from crypto_signal_bot.exchanges.base import ExchangeClientError, ExchangeRateLimitError
-from crypto_signal_bot.exchanges.rate_limit import RetryPolicy, UpbitRemainingReqLimiter
+from crypto_signal_bot.exchanges.rate_limit import RetryPolicy, UpbitRemainingReqLimiter, parse_retry_after_seconds
 from crypto_signal_bot.exchanges.safety import assert_public_endpoint
 from crypto_signal_bot.features.indicators import interval_to_minutes
 
@@ -160,9 +160,4 @@ def parse_upbit_orderbook(item: dict[str, Any]) -> OrderBook:
 
 def _retry_after_seconds(response: Any) -> float | None:
     value = response.headers.get("Retry-After") if hasattr(response, "headers") else None
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
+    return parse_retry_after_seconds(value)

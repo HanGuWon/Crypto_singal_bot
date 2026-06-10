@@ -11,7 +11,8 @@ Upbit:
 - Orderbook: `/v1/orderbook`
 
 Upbit rate-limit handling parses `Remaining-Req` and uses the `sec` field. The deprecated `min`
-field is ignored. HTTP 429 is retried with bounded backoff. HTTP 418 fails the client request.
+field is ignored. HTTP 429 is retried with bounded backoff. `Retry-After` may be seconds or an
+HTTP-date. HTTP 418 fails the client request.
 
 Binance:
 
@@ -31,4 +32,5 @@ Collection policy:
   `orderbook_unavailable` research risk flag.
 
 Binance request weights are tracked from `X-MBX-USED-WEIGHT-1M`. HTTP 429 is retried with bounded
-backoff and `Retry-After` when present. HTTP 418 fails the client request.
+backoff and `Retry-After` when present as seconds or an HTTP-date. HTTP 418 fails the client
+request.
