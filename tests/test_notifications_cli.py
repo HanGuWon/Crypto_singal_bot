@@ -150,6 +150,45 @@ def test_outbox_list_and_drain_dry_run_exclude_terminal_rows(
     assert "No notification was sent" in dry_run_output
 
 
+def test_outbox_drain_records_undeliverable_rows(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "notifications.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
+    store = SQLiteStore(db_path)
+    existing_event = make_alert(alert_event_id="event-without-notifier")
+    store.insert_alert_event(existing_event)
+    missing_event_id = store.insert_notification_outbox(
+        alert_event_id="missing-event",
+        channel="telegram",
+        destination_hash=destination_hash("telegram", "chat-1:token"),
+        created_at_utc=datetime.now(tz=UTC).isoformat(),
+    )
+    no_notifier_id = store.insert_notification_outbox(
+        alert_event_id=existing_event.alert_event_id,
+        channel="discord",
+        destination_hash=destination_hash("discord", "https://discord.com/api/webhooks/123/secret"),
+        created_at_utc=datetime.now(tz=UTC).isoformat(),
+    )
+
+    assert main(["notifications", "outbox", "drain", "--max", "5"]) == 0
+    output = capsys.readouterr().out
+    assert "missing_alert_event" in output
+    assert "notifier_unavailable" in output
+    assert "secret" not in output
+
+    rows = {row["id"]: row for row in store.list_notification_outbox()}
+    assert rows[missing_event_id]["status"] == "failed_terminal"
+    assert rows[missing_event_id]["last_error_code"] == "missing_alert_event"
+    assert rows[missing_event_id]["retry_count"] == 1
+    assert rows[no_notifier_id]["status"] == "failed_retryable"
+    assert rows[no_notifier_id]["last_error_code"] == "notifier_unavailable"
+    assert rows[no_notifier_id]["retry_count"] == 1
+
+
 def test_previous_alert_policy_inputs_skip_current_saved_run(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "notifications.sqlite")
     _insert_research_run(store, "previous-run", "2026-01-01T00:00:00+00:00")

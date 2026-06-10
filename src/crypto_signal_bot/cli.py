@@ -2022,8 +2022,27 @@ def _notifications_outbox_drain(args: argparse.Namespace, settings: Settings, st
     for row in rows:
         notifier = _matching_notifier(notifiers, str(row["channel"]), str(row["destination_hash"]))
         event = store.fetch_alert_event(str(row["alert_event_id"]))
-        if notifier is None or event is None:
-            skipped.append(_outbox_row_to_dict(row))
+        if event is None:
+            skipped.append(
+                _complete_undeliverable_outbox(
+                    store,
+                    row,
+                    status="failed_terminal",
+                    error_code="missing_alert_event",
+                    error_message="Alert event payload is missing; outbox row cannot be delivered.",
+                )
+            )
+            continue
+        if notifier is None:
+            skipped.append(
+                _complete_undeliverable_outbox(
+                    store,
+                    row,
+                    status="failed_retryable",
+                    error_code="notifier_unavailable",
+                    error_message="No configured notifier matches this channel and destination hash.",
+                )
+            )
             continue
         dispatcher = NotificationDispatcher(
             True,
@@ -2044,6 +2063,36 @@ def _notifications_outbox_drain(args: argparse.Namespace, settings: Settings, st
             )
     _print_json({"drained": delivered, "skipped": skipped})
     return 0
+
+
+def _complete_undeliverable_outbox(
+    store: SQLiteStore,
+    row: Any,
+    *,
+    status: str,
+    error_code: str,
+    error_message: str,
+) -> dict[str, object]:
+    retry_count = int(row["retry_count"]) + 1
+    store.complete_notification_outbox(
+        outbox_id=str(row["id"]),
+        status=status,
+        completed_at_utc=datetime.now(tz=UTC).isoformat(),
+        retry_count=retry_count,
+        last_error_code=error_code,
+        last_error_message=error_message,
+        provider_response={},
+    )
+    skipped = _outbox_row_to_dict(row)
+    skipped.update(
+        {
+            "status": status,
+            "retry_count": retry_count,
+            "last_error_code": error_code,
+            "last_error_message": error_message,
+        }
+    )
+    return skipped
 
 
 def _score_from_store(

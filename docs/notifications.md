@@ -53,6 +53,9 @@ Dedupe, cooldown, and hysteresis:
   so cooldown state and outbox audit rows can explain the next retry window.
 - The CLI creates `notification_outbox` rows before provider sends, then claims and completes those
   rows during dispatch.
+- The outbox drain command records undeliverable rows instead of silently skipping them: missing
+  alert payloads become terminal failures, while currently unavailable channel/destination matches
+  remain retryable with an explicit error code.
 - Digest support is a separate disabled-by-default policy path. `DigestPolicy` can build a
   research-only digest preview with top candidates and major score changes, but it does not dispatch
   provider messages and does not affect instant alert policy. Digest rows include candidate data
