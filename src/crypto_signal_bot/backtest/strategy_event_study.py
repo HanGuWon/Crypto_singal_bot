@@ -1,0 +1,394 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from statistics import median
+from typing import Any
+from uuid import uuid4
+
+from crypto_signal_bot.backtest.leakage_checks import assert_next_candle_entry
+from crypto_signal_bot.backtest.metrics import summarize_returns
+from crypto_signal_bot.data.models import Candle, DataQualityReport
+from crypto_signal_bot.features.bottoming import compute_bottoming_state
+from crypto_signal_bot.features.indicators import stochastic_cross_up, stochastic_kd
+from crypto_signal_bot.features.three_tick import compute_three_tick_state
+from crypto_signal_bot.signals.entry_timing import EntryTimingConfig, EntryTimingScorer
+from crypto_signal_bot.signals.schemas import SignalCandidate
+
+STRATEGY_VARIANTS = (
+    "raw_three_tick_watch",
+    "confirmed_entry_timing",
+    "bottoming_confirmed",
+    "stochastic_three_tick_confirmation",
+    "excluding_falling_knife",
+)
+
+
+@dataclass(frozen=True)
+class StrategyEventStudyConfig:
+    min_history_bars: int = 30
+    horizons: tuple[int, ...] = (1, 3, 6, 12)
+    fee_bps: float = 10.0
+    spread_bps: float = 5.0
+    slippage_bps: float = 5.0
+    signal_cooldown_bars: int = 3
+    entry_timing: EntryTimingConfig = EntryTimingConfig(
+        min_upside_score=0.0,
+        min_liquidity_component=0.0,
+    )
+
+    @property
+    def round_trip_cost(self) -> float:
+        return (self.fee_bps + self.spread_bps + self.slippage_bps) / 10000
+
+
+def strategy_event_study(
+    candles_by_symbol: dict[str, list[Candle]],
+    *,
+    benchmark_symbol: str | None = None,
+    config: StrategyEventStudyConfig | None = None,
+) -> dict[str, object]:
+    cfg = config or StrategyEventStudyConfig()
+    signal_records = _strategy_signal_records(candles_by_symbol, cfg)
+    summaries = {
+        variant: _variant_horizon_summaries(candles_by_symbol, signal_records[variant], cfg)
+        for variant in STRATEGY_VARIANTS
+    }
+    return {
+        **_strategy_diagnostic_flags(),
+        "variants": list(STRATEGY_VARIANTS),
+        "horizons": list(cfg.horizons),
+        "signal_counts": {
+            variant: len(signal_records[variant])
+            for variant in STRATEGY_VARIANTS
+        },
+        "variant_summaries": summaries,
+        "benchmark_diagnostics": _benchmark_diagnostics(
+            candles_by_symbol,
+            signal_records,
+            benchmark_symbol=benchmark_symbol,
+            config=cfg,
+        ),
+        "falling_knife_filter": _falling_knife_filter(candles_by_symbol, signal_records, cfg),
+        "sample_signals": {
+            variant: signal_records[variant][:5]
+            for variant in STRATEGY_VARIANTS
+        },
+    }
+
+
+def generate_strategy_signal_indices(
+    candles: list[Candle],
+    *,
+    variant: str,
+    config: StrategyEventStudyConfig | None = None,
+) -> list[int]:
+    cfg = config or StrategyEventStudyConfig()
+    return [
+        int(record["signal_index"])
+        for record in _symbol_signal_records(candles, cfg).get(variant, [])
+    ]
+
+
+def _strategy_signal_records(
+    candles_by_symbol: dict[str, list[Candle]],
+    config: StrategyEventStudyConfig,
+) -> dict[str, list[dict[str, Any]]]:
+    records: dict[str, list[dict[str, Any]]] = {variant: [] for variant in STRATEGY_VARIANTS}
+    for symbol, candles in candles_by_symbol.items():
+        by_variant = _symbol_signal_records(candles, config)
+        for variant, variant_records in by_variant.items():
+            for record in variant_records:
+                records[variant].append({"symbol": symbol, **record})
+    return records
+
+
+def _symbol_signal_records(
+    candles: list[Candle],
+    config: StrategyEventStudyConfig,
+) -> dict[str, list[dict[str, Any]]]:
+    records: dict[str, list[dict[str, Any]]] = {variant: [] for variant in STRATEGY_VARIANTS}
+    if len(candles) <= config.min_history_bars + max(config.horizons) + 1:
+        return records
+
+    last_signal_index = {variant: -10_000 for variant in STRATEGY_VARIANTS}
+    max_horizon = max(config.horizons)
+    for index in range(config.min_history_bars, len(candles) - max_horizon - 1):
+        if not candles[index].is_closed:
+            continue
+        past = candles[: index + 1]
+        state = _strategy_state_at(past, config)
+        triggered = _triggered_variants(state)
+        for variant in triggered:
+            if index - last_signal_index[variant] <= config.signal_cooldown_bars:
+                continue
+            records[variant].append(_record_for_signal(candles, index, state))
+            last_signal_index[variant] = index
+    return records
+
+
+def _strategy_state_at(candles: list[Candle], config: StrategyEventStudyConfig) -> dict[str, Any]:
+    latest = candles[-1]
+    candidate = _candidate_for_backtest(latest)
+    quality = DataQualityReport(
+        status="pass",
+        warnings=[],
+        coverage_ratio=1.0,
+        stale_seconds=0.0,
+        latest_close_time_utc=latest.close_time_utc,
+    )
+    entry_timing = EntryTimingScorer(config.entry_timing).score(
+        candidate,
+        candles,
+        quality=quality,
+    )
+    three_tick = compute_three_tick_state(candles, config.entry_timing.three_tick)
+    bottoming = compute_bottoming_state(candles, config.entry_timing.bottoming)
+    closed = [candle for candle in candles if candle.is_closed]
+    highs = [candle.high for candle in closed]
+    lows = [candle.low for candle in closed]
+    closes = [candle.close for candle in closed]
+    k_values, d_values = stochastic_kd(highs, lows, closes)
+    return {
+        "entry_timing_status": entry_timing.status,
+        "entry_timing_score": entry_timing.entry_timing_score,
+        "three_tick_status": three_tick.status,
+        "bottoming_status": bottoming.status,
+        "stochastic_cross_up": stochastic_cross_up(k_values, d_values),
+        "reason_codes": [
+            *three_tick.reason_codes,
+            *bottoming.reason_codes,
+            *entry_timing.reason_codes,
+        ],
+        "risk_flags": [
+            *three_tick.risk_flags,
+            *bottoming.risk_flags,
+            *entry_timing.risk_flags,
+        ],
+    }
+
+
+def _triggered_variants(state: dict[str, Any]) -> list[str]:
+    risk_flags = set(state["risk_flags"])
+    variants: list[str] = []
+    if state["three_tick_status"] == "watch":
+        variants.append("raw_three_tick_watch")
+    if state["entry_timing_status"] == "confirmed_candidate":
+        variants.append("confirmed_entry_timing")
+    if state["bottoming_status"] == "confirmed":
+        variants.append("bottoming_confirmed")
+    if state["three_tick_status"] == "watch" and state["stochastic_cross_up"]:
+        variants.append("stochastic_three_tick_confirmation")
+    if (
+        state["entry_timing_status"] in {"confirmed_candidate", "watch"}
+        and "falling_knife_suppress" not in risk_flags
+    ):
+        variants.append("excluding_falling_knife")
+    return variants
+
+
+def _record_for_signal(candles: list[Candle], index: int, state: dict[str, Any]) -> dict[str, Any]:
+    entry_index = index + 1
+    assert_next_candle_entry(candles[index], candles[entry_index])
+    return {
+        "signal_index": index,
+        "entry_index": entry_index,
+        "signal_time_utc": candles[index].close_time_utc.isoformat(),
+        "entry_time_utc": candles[entry_index].open_time_utc.isoformat(),
+        "entry_price": candles[entry_index].open,
+        "entry_timing_status": state["entry_timing_status"],
+        "three_tick_status": state["three_tick_status"],
+        "bottoming_status": state["bottoming_status"],
+        "stochastic_cross_up": state["stochastic_cross_up"],
+        "reason_codes": _unique_strings(state["reason_codes"])[:10],
+        "risk_flags": _unique_strings(state["risk_flags"])[:10],
+    }
+
+
+def _variant_horizon_summaries(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    config: StrategyEventStudyConfig,
+) -> dict[str, dict[str, float]]:
+    return {
+        str(horizon): summarize_returns([
+            ret
+            for record in records
+            if (ret := _forward_return(candles_by_symbol, record, horizon, config.round_trip_cost)) is not None
+        ])
+        for horizon in config.horizons
+    }
+
+
+def _benchmark_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_records: dict[str, list[dict[str, Any]]],
+    *,
+    benchmark_symbol: str | None,
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    if benchmark_symbol is None or benchmark_symbol not in candles_by_symbol:
+        return {
+            "benchmark_symbol": benchmark_symbol,
+            "windows_aligned_point_in_time": True,
+            "benchmark_return": {},
+            "universe_median_return": {},
+        }
+    records = signal_records["confirmed_entry_timing"] or signal_records["excluding_falling_knife"]
+    return {
+        "benchmark_symbol": benchmark_symbol,
+        "windows_aligned_point_in_time": True,
+        "benchmark_return": {
+            str(horizon): summarize_returns([
+                ret
+                for record in records
+                if (
+                    ret := _symbol_forward_return(
+                        candles_by_symbol[benchmark_symbol],
+                        int(record["signal_index"]),
+                        horizon,
+                        0.0,
+                    )
+                )
+                is not None
+            ])
+            for horizon in config.horizons
+        },
+        "universe_median_return": {
+            str(horizon): summarize_returns(_universe_median_returns(candles_by_symbol, records, horizon))
+            for horizon in config.horizons
+        },
+    }
+
+
+def _falling_knife_filter(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_records: dict[str, list[dict[str, Any]]],
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    raw_records = signal_records["raw_three_tick_watch"]
+    without_falling_knife = [
+        record
+        for record in raw_records
+        if "falling_knife_suppress" not in record.get("risk_flags", [])
+    ]
+    horizon = config.horizons[0]
+    return {
+        "variant": "raw_three_tick_watch",
+        "horizon_bars": horizon,
+        "including_all_signals": summarize_returns([
+            ret
+            for record in raw_records
+            if (ret := _forward_return(candles_by_symbol, record, horizon, config.round_trip_cost)) is not None
+        ]),
+        "excluding_falling_knife": summarize_returns([
+            ret
+            for record in without_falling_knife
+            if (ret := _forward_return(candles_by_symbol, record, horizon, config.round_trip_cost)) is not None
+        ]),
+    }
+
+
+def _forward_return(
+    candles_by_symbol: dict[str, list[Candle]],
+    record: dict[str, Any],
+    horizon_bars: int,
+    cost: float,
+) -> float | None:
+    candles = candles_by_symbol.get(str(record["symbol"]), [])
+    return _symbol_forward_return(candles, int(record["signal_index"]), horizon_bars, cost)
+
+
+def _symbol_forward_return(
+    candles: list[Candle],
+    signal_index: int,
+    horizon_bars: int,
+    cost: float,
+) -> float | None:
+    entry_index = signal_index + 1
+    exit_index = entry_index + horizon_bars
+    if signal_index < 0 or exit_index >= len(candles):
+        return None
+    signal = candles[signal_index]
+    entry = candles[entry_index]
+    exit_candle = candles[exit_index]
+    if not signal.is_closed or not entry.is_closed or not exit_candle.is_closed:
+        return None
+    assert_next_candle_entry(signal, entry)
+    if entry.open <= 0:
+        return None
+    return exit_candle.close / entry.open - 1 - cost
+
+
+def _universe_median_returns(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    horizon_bars: int,
+) -> list[float]:
+    returns: list[float] = []
+    for record in records:
+        window_returns = [
+            value
+            for candles in candles_by_symbol.values()
+            if (
+                value := _symbol_forward_return(
+                    candles,
+                    int(record["signal_index"]),
+                    horizon_bars,
+                    0.0,
+                )
+            )
+            is not None
+        ]
+        if window_returns:
+            returns.append(median(window_returns))
+    return returns
+
+
+def _candidate_for_backtest(candle: Candle) -> SignalCandidate:
+    return SignalCandidate(
+        exchange=candle.exchange,
+        symbol=candle.symbol,
+        interval=candle.interval,
+        current_price=candle.close,
+        score=75.0,
+        component_scores={
+            "trend": 60.0,
+            "momentum": 60.0,
+            "volume": 70.0,
+            "liquidity": 80.0,
+            "breakout": 50.0,
+            "relative_strength": 50.0,
+            "market_regime": 55.0,
+        },
+        confidence="medium",
+        rank=None,
+        drivers=["strategy_event_study_fixture"],
+        risk_flags=[],
+        invalidation_condition="Strategy event study diagnostic only.",
+        data_timestamp_utc=candle.close_time_utc.isoformat(),
+        source_run_id=str(uuid4()),
+        is_closed_candle_signal=candle.is_closed,
+        data_quality_status="pass",
+    )
+
+
+def _strategy_diagnostic_flags() -> dict[str, bool | str]:
+    return {
+        "strategy_event_study_only": True,
+        "diagnostic_event_study_only": True,
+        "not_portfolio_simulator": True,
+        "no_execution_model": True,
+        "hypothetical_diagnostic_only": True,
+        "closed_candle_signals_only": True,
+        "next_open_entry_enforced": True,
+        "notification_logic_excluded": True,
+        "not_financial_advice": True,
+        "research_warning": (
+            "Strategy event study is hypothetical diagnostic research only. "
+            "It is not financial advice, not a portfolio simulator, and no order was placed."
+        ),
+    }
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(value for value in values if value))

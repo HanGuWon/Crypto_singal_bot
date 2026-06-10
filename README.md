@@ -68,6 +68,10 @@ The MVP backtest path is a leakage-safety diagnostic with next-candle entries, b
 context, cost sensitivity, and data-quality-conditioned summaries. It is not a trading
 recommendation, not financial advice, and no order is placed.
 
+The entry timing strategy event-study utilities are diagnostic-only and keep the same closed-candle
+signal / next-candle-open entry rule. They compare strategy variants, forward horizons, benchmark
+windows, and falling-knife exclusion effects without using notification logic.
+
 Notification formatting test:
 
 ```bash

@@ -1,1 +1,1 @@
-"""Minimal leakage-safe backtest utilities for the MVP."""
+"""Leakage-safe diagnostic backtest utilities for the research MVP."""
