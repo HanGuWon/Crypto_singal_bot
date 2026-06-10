@@ -70,6 +70,11 @@ def strategy_event_study(
             benchmark_symbol=benchmark_symbol,
             config=cfg,
         ),
+        "baseline_diagnostics": _strategy_baseline_diagnostics(
+            candles_by_symbol,
+            signal_records,
+            config=cfg,
+        ),
         "stress_diagnostics": _strategy_stress_diagnostics(
             candles_by_symbol,
             signal_records,
@@ -310,6 +315,116 @@ def _benchmark_diagnostics(
             for horizon in config.horizons
         },
     }
+
+
+def _strategy_baseline_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_records: dict[str, list[dict[str, Any]]],
+    *,
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    return {
+        "windows_aligned_point_in_time": True,
+        "applied_round_trip_cost_fraction": config.round_trip_cost,
+        "variant_baselines": {
+            variant: {
+                "deterministic_random_symbol_return": _baseline_horizon_summaries(
+                    candles_by_symbol,
+                    records,
+                    config,
+                    selector="deterministic_random",
+                ),
+                "liquidity_ranked_symbol_return": _baseline_horizon_summaries(
+                    candles_by_symbol,
+                    records,
+                    config,
+                    selector="liquidity_ranked",
+                ),
+            }
+            for variant, records in signal_records.items()
+        },
+        "baseline_notes": (
+            "Baselines are deterministic strategy event-study diagnostics using the same windows. "
+            "They are not execution models."
+        ),
+    }
+
+
+def _baseline_horizon_summaries(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    config: StrategyEventStudyConfig,
+    *,
+    selector: str,
+) -> dict[str, dict[str, float]]:
+    return {
+        str(horizon): summarize_returns(
+            _baseline_returns(
+                candles_by_symbol,
+                records,
+                horizon,
+                config.round_trip_cost,
+                selector=selector,
+            )
+        )
+        for horizon in config.horizons
+    }
+
+
+def _baseline_returns(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    horizon_bars: int,
+    cost: float,
+    *,
+    selector: str,
+) -> list[float]:
+    returns: list[float] = []
+    for record in records:
+        symbols = _eligible_baseline_symbols(candles_by_symbol, record, horizon_bars, cost)
+        if not symbols:
+            continue
+        if selector == "deterministic_random":
+            selected = symbols[_stable_baseline_index(record, horizon_bars, len(symbols))]
+        elif selector == "liquidity_ranked":
+            selected = max(
+                symbols,
+                key=lambda symbol: (
+                    candles_by_symbol[symbol][int(record["signal_index"])].quote_volume or 0.0,
+                    symbol,
+                ),
+            )
+        else:
+            raise ValueError(f"Unknown baseline selector: {selector}")
+        ret = _symbol_forward_return(
+            candles_by_symbol[selected],
+            int(record["signal_index"]),
+            horizon_bars,
+            cost,
+        )
+        if ret is not None:
+            returns.append(ret)
+    return returns
+
+
+def _eligible_baseline_symbols(
+    candles_by_symbol: dict[str, list[Candle]],
+    record: dict[str, Any],
+    horizon_bars: int,
+    cost: float,
+) -> list[str]:
+    signal_index = int(record["signal_index"])
+    return [
+        symbol
+        for symbol, candles in sorted(candles_by_symbol.items())
+        if _symbol_forward_return(candles, signal_index, horizon_bars, cost) is not None
+    ]
+
+
+def _stable_baseline_index(record: dict[str, Any], horizon_bars: int, symbol_count: int) -> int:
+    symbol = str(record["symbol"])
+    symbol_offset = sum(ord(character) for character in symbol)
+    return (int(record["signal_index"]) + horizon_bars + symbol_offset) % symbol_count
 
 
 def _falling_knife_filter(

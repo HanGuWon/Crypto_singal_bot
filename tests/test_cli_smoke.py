@@ -587,6 +587,7 @@ def test_cli_strategy_event_study_mock_json(tmp_path, monkeypatch, capsys) -> No
     assert payload["cost_model"]["spread_bps"] == 6.0
     assert payload["cost_model"]["slippage_bps"] == 4.0
     assert "cost_sensitivity" in payload
+    assert payload["baseline_diagnostics"]["windows_aligned_point_in_time"] is True
     assert payload["stress_diagnostics"]["strategy_event_stress_only"] is True
     assert "variant_summaries" in payload
     assert "buy now" not in json.dumps(payload).lower()

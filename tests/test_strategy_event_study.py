@@ -91,6 +91,23 @@ def test_strategy_benchmark_windows_are_point_in_time() -> None:
     assert "3" in diagnostics["universe_median_return"]
 
 
+def test_strategy_event_study_reports_point_in_time_baselines() -> None:
+    result = strategy_event_study(
+        _strategy_universe(),
+        benchmark_symbol="BTCUSDT",
+        config=StrategyEventStudyConfig(horizons=(1, 3), min_history_bars=20),
+    )
+
+    baselines = result["baseline_diagnostics"]
+    confirmed = baselines["variant_baselines"]["confirmed_entry_timing"]
+
+    assert baselines["windows_aligned_point_in_time"] is True
+    assert baselines["applied_round_trip_cost_fraction"] == 0.002
+    assert confirmed["deterministic_random_symbol_return"]["1"]["trades"] >= 1
+    assert confirmed["liquidity_ranked_symbol_return"]["3"]["trades"] >= 1
+    assert "execution models" in baselines["baseline_notes"]
+
+
 def test_strategy_event_study_reports_stress_diagnostics() -> None:
     universe = _strategy_universe()
     universe["BTCUSDT"] = _shift_candles_from(universe["BTCUSDT"], start_index=35, minutes=5)
