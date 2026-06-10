@@ -80,7 +80,7 @@ class AlertPolicy:
                 "WARNING",
                 previous_score,
                 now,
-                risk_flags=candidate.risk_flags or ["score_below_exit_threshold"],
+                risk_flags=_invalidation_risk_flags(candidate, self.config.exit_threshold),
             )
             invalidation_state = self.state_store.get(
                 candidate.exchange, candidate.symbol, candidate.interval, "INVALIDATION"
@@ -327,3 +327,16 @@ def _has_single_extreme_component(candidate: SignalCandidate) -> bool:
     ordered = sorted(scored_components, reverse=True)
     constructive_count = sum(1 for value in scored_components if value >= 60)
     return ordered[0] >= 90 and ordered[1] < 60 and constructive_count <= 1
+
+
+def _invalidation_risk_flags(candidate: SignalCandidate, exit_threshold: float) -> list[str]:
+    flags = list(candidate.risk_flags)
+    if candidate.score <= exit_threshold:
+        flags.append("score_below_exit_threshold")
+    if candidate.data_quality_status == "warn":
+        flags.append("data_quality_warning")
+    elif candidate.data_quality_status == "fail":
+        flags.append("failed_data_quality")
+    elif candidate.data_quality_status != "pass":
+        flags.append("data_quality_not_pass")
+    return list(dict.fromkeys(flags))

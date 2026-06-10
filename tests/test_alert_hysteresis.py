@@ -24,6 +24,23 @@ def test_hysteresis_exits_below_exit_threshold() -> None:
     assert any(event.event_type == "INVALIDATION" for event in events)
 
 
+def test_data_quality_invalidation_uses_data_quality_risk_flag() -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    policy = AlertPolicy(AlertPolicyConfig(score_threshold=80, exit_threshold=65))
+    policy.evaluate([make_candidate(score=82)], previous_scores={"BTCUSDT": 70}, now=now)
+
+    events = policy.evaluate(
+        [make_candidate(score=82, data_quality_status="warn", risk_flags=[])],
+        previous_scores={"BTCUSDT": 82},
+        now=now + timedelta(minutes=1),
+    )
+
+    invalidations = [event for event in events if event.event_type == "INVALIDATION"]
+    assert invalidations
+    assert "data_quality_warning" in invalidations[0].risk_flags
+    assert "score_below_exit_threshold" not in invalidations[0].risk_flags
+
+
 def test_sqlite_alert_state_suppresses_repeated_cli_like_runs(tmp_path) -> None:
     state_path = tmp_path / "alerts.sqlite"
     first_policy = AlertPolicy(

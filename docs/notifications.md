@@ -25,6 +25,7 @@ AlertPolicy handles:
 - breakout watch
 - risk warning
 - invalidation
+- data-quality invalidation flags for previously alerted candidates
 - stale, missing-candle, and failed-quality suppression
 - closed-candle only suppression
 - single-extreme-component suppression
