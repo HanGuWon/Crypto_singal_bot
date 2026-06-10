@@ -80,6 +80,35 @@ def test_benchmark_windows_align_point_in_time() -> None:
     assert benchmark["benchmark_return"]["trades"] == 6.0
 
 
+def test_diagnostic_baselines_use_same_point_in_time_windows() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {symbol: [50, 70] for symbol in candles_by_symbol}
+
+    metrics = diagnostic_event_study(candles_by_symbol, signal_indices, benchmark_symbol="BTCUSDT")
+
+    baselines = metrics["baseline_diagnostics"]
+    assert baselines["windows_aligned_point_in_time"] is True
+    assert baselines["deterministic_random_symbol_return"]["trades"] == 6.0
+    assert baselines["liquidity_ranked_symbol_return"]["trades"] == 6.0
+    assert "not portfolio execution models" in baselines["baseline_notes"]
+
+
+def test_event_exposure_diagnostics_are_event_overlap_only() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {symbol: [50, 51] for symbol in candles_by_symbol}
+
+    metrics = diagnostic_event_study(candles_by_symbol, signal_indices, benchmark_symbol="BTCUSDT")
+
+    exposure = metrics["event_exposure_diagnostics"]
+    assert exposure["events"] == 6
+    assert exposure["unique_signal_times"] == 2
+    assert exposure["average_events_per_signal_time"] == 3.0
+    assert exposure["max_events_same_signal_time"] == 3
+    assert exposure["max_overlapping_event_windows"] >= 3
+    assert exposure["event_overlap_only"] is True
+    assert exposure["not_portfolio_exposure"] is True
+
+
 def test_quarantined_and_stale_symbols_are_conditioned_out() -> None:
     candles_by_symbol = _mock_universe(limit=100)
     signal_indices = {symbol: [50] for symbol in candles_by_symbol}

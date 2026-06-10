@@ -64,6 +64,8 @@ def diagnostic_event_study(
             ),
             "windows_aligned_point_in_time": True,
         },
+        "baseline_diagnostics": _baseline_diagnostics(candles_by_symbol, records),
+        "event_exposure_diagnostics": _event_exposure_diagnostics(records, base_assumptions),
         "sensitivity_grid": _sensitivity_grid(
             candles_by_symbol,
             signal_indices_by_symbol,
@@ -121,6 +123,8 @@ def _event_records(
                 {
                     "symbol": symbol,
                     "signal_index": index,
+                    "entry_index": entry_index,
+                    "exit_index": exit_index,
                     "signal_time_utc": candles[index].close_time_utc.isoformat(),
                     "entry_time_utc": candles[entry_index].open_time_utc.isoformat(),
                     "exit_time_utc": candles[exit_index].close_time_utc.isoformat(),
@@ -148,6 +152,85 @@ def _benchmark_records(
             continue
         output.append({**record, "symbol": benchmark_symbol, "return": ret})
     return output
+
+
+def _baseline_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+) -> dict[str, object]:
+    assumptions = BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0)
+    return {
+        "windows_aligned_point_in_time": True,
+        "deterministic_random_symbol_return": summarize_returns(
+            _deterministic_random_baseline_returns(candles_by_symbol, records, assumptions)
+        ),
+        "liquidity_ranked_symbol_return": summarize_returns(
+            _liquidity_ranked_baseline_returns(candles_by_symbol, records, assumptions)
+        ),
+        "baseline_notes": (
+            "Baselines are deterministic event-study diagnostics using the same signal windows. "
+            "They are not portfolio execution models."
+        ),
+    }
+
+
+def _deterministic_random_baseline_returns(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    assumptions: BacktestAssumptions,
+) -> list[float]:
+    returns: list[float] = []
+    for record in records:
+        symbols = _eligible_symbols_for_window(candles_by_symbol, int(record["signal_index"]), assumptions)
+        if not symbols:
+            continue
+        selected = symbols[_stable_baseline_index(record, len(symbols))]
+        ret = _window_return(candles_by_symbol[selected], int(record["signal_index"]), assumptions)
+        if ret is not None:
+            returns.append(ret)
+    return returns
+
+
+def _liquidity_ranked_baseline_returns(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    assumptions: BacktestAssumptions,
+) -> list[float]:
+    returns: list[float] = []
+    for record in records:
+        index = int(record["signal_index"])
+        symbols = _eligible_symbols_for_window(candles_by_symbol, index, assumptions)
+        if not symbols:
+            continue
+        selected = max(
+            symbols,
+            key=lambda symbol: (
+                candles_by_symbol[symbol][index].quote_volume or 0.0,
+                symbol,
+            ),
+        )
+        ret = _window_return(candles_by_symbol[selected], index, assumptions)
+        if ret is not None:
+            returns.append(ret)
+    return returns
+
+
+def _eligible_symbols_for_window(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_index: int,
+    assumptions: BacktestAssumptions,
+) -> list[str]:
+    return [
+        symbol
+        for symbol, candles in sorted(candles_by_symbol.items())
+        if _window_return(candles, signal_index, assumptions) is not None
+    ]
+
+
+def _stable_baseline_index(record: dict[str, Any], symbol_count: int) -> int:
+    symbol = str(record["symbol"])
+    symbol_offset = sum(ord(character) for character in symbol)
+    return (int(record["signal_index"]) + symbol_offset) % symbol_count
 
 
 def _universe_window_returns(
@@ -222,6 +305,56 @@ def _conditioned_results(records: list[dict[str, Any]]) -> dict[str, dict[str, f
             ]
         ),
     }
+
+
+def _event_exposure_diagnostics(
+    records: list[dict[str, Any]],
+    assumptions: BacktestAssumptions,
+) -> dict[str, object]:
+    if not records:
+        return {
+            "events": 0,
+            "unique_signal_times": 0,
+            "average_events_per_signal_time": 0.0,
+            "max_events_same_signal_time": 0,
+            "holding_bars": assumptions.holding_bars,
+            "max_overlapping_event_windows": 0,
+            "average_overlapping_event_windows": 0.0,
+            "diagnostic_turnover_events_per_signal_time": 0.0,
+            "event_overlap_only": True,
+            "not_portfolio_exposure": True,
+        }
+    counts_by_signal_time: dict[str, int] = {}
+    for record in records:
+        signal_time = str(record["signal_time_utc"])
+        counts_by_signal_time[signal_time] = counts_by_signal_time.get(signal_time, 0) + 1
+    overlap_counts = _overlap_counts(records)
+    unique_signal_times = len(counts_by_signal_time)
+    return {
+        "events": len(records),
+        "unique_signal_times": unique_signal_times,
+        "average_events_per_signal_time": len(records) / unique_signal_times,
+        "max_events_same_signal_time": max(counts_by_signal_time.values()),
+        "holding_bars": assumptions.holding_bars,
+        "max_overlapping_event_windows": max(overlap_counts),
+        "average_overlapping_event_windows": sum(overlap_counts) / len(overlap_counts),
+        "diagnostic_turnover_events_per_signal_time": len(records) / unique_signal_times,
+        "event_overlap_only": True,
+        "not_portfolio_exposure": True,
+    }
+
+
+def _overlap_counts(records: list[dict[str, Any]]) -> list[int]:
+    min_entry = min(int(record["entry_index"]) for record in records)
+    max_exit = max(int(record["exit_index"]) for record in records)
+    return [
+        sum(
+            1
+            for record in records
+            if int(record["entry_index"]) <= index <= int(record["exit_index"])
+        )
+        for index in range(min_entry, max_exit + 1)
+    ]
 
 
 def _walk_forward_diagnostic(records: list[dict[str, Any]]) -> dict[str, object]:

@@ -70,7 +70,9 @@ Backtest output is marked with `diagnostic_event_study_only=true`,
 The MVP backtest path is a leakage-safety diagnostic with next-candle entries, benchmark/universe
 context, cost sensitivity, data-quality-conditioned summaries, and return-distribution metrics such
 as hit rate, average win/loss, gain/loss factor, Sharpe, Sortino, max drawdown, and tail loss. It is
-not a trading recommendation, not financial advice, and no order is placed.
+not a trading recommendation, not financial advice, and no order is placed. Diagnostic comparisons
+include BTC/universe context plus deterministic random-symbol and liquidity-ranked baselines using
+the same point-in-time windows.
 
 The entry timing strategy event-study utilities are diagnostic-only and keep the same closed-candle
 signal / next-candle-open entry rule. They compare strategy variants, forward horizons, benchmark

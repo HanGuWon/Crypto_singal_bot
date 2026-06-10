@@ -33,6 +33,11 @@ Diagnostic backtest summaries report event counts, hit rate, average return, ave
 gain/loss factor, max drawdown, Sharpe, Sortino, worst return, and 5th-percentile tail loss. These
 are event-study diagnostics, not a portfolio execution model.
 
+Baseline diagnostics compare the same event windows against BTC, universe median/equal-weight
+returns, deterministic random-symbol selection, and a point-in-time liquidity-ranked symbol. Event
+turnover and exposure fields describe signal-window overlap only; they are not account exposure,
+allocation, or order execution.
+
 Entry timing research:
 
 - The original upside score remains the first-stage candidate score.
