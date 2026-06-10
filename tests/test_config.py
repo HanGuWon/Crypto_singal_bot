@@ -20,6 +20,7 @@ def test_default_config_is_research_only() -> None:
     assert settings.symbol_quarantine_minutes == 120
     assert settings.max_orderbook_symbols_per_collect == 10
     assert settings.orderbook_depth_limit == 20
+    assert settings.max_orderbook_age_seconds == 60
     assert settings.display_timezone == "Asia/Seoul"
     assert settings.exit_guard.enabled is False
     assert settings.exit_guard.dry_run is True
@@ -41,6 +42,8 @@ def test_unsafe_modes_fail_closed() -> None:
         Settings(private_api_enabled=True).validate_safety()
     with pytest.raises(ConfigError):
         Settings(require_manual_approval=False).validate_safety()
+    with pytest.raises(ConfigError):
+        Settings(max_orderbook_age_seconds=0).validate_safety()
 
 
 def test_invalid_display_timezone_is_rejected() -> None:
@@ -95,3 +98,11 @@ def test_exit_guard_thresholds_load_from_environment(monkeypatch) -> None:  # ty
     assert settings.exit_guard.max_orderbook_age_seconds == 45
     assert settings.exit_guard.max_slippage_pct == 0.75
     assert settings.exit_guard.symbol_allowlist == ("BTCUSDT", "upbit_spot:KRW-BTC")
+
+
+def test_market_snapshot_thresholds_load_from_environment(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("MAX_ORDERBOOK_AGE_SECONDS", "90")
+
+    settings = load_settings()
+
+    assert settings.max_orderbook_age_seconds == 90

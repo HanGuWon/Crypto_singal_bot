@@ -56,7 +56,9 @@ python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interv
 
 Collection stores closed public candles and 24h ticker snapshots by default. Shallow orderbook
 snapshots are opt-in with `--with-orderbook` and capped by `--max-orderbook-symbols` to avoid
-expensive polling loops.
+expensive polling loops. Ranking treats stored orderbook snapshots older than
+`MAX_ORDERBOOK_AGE_SECONDS` as `stale_orderbook` research risk instead of silently trusting the
+spread.
 For Upbit, small internal candle gaps can be marked as `upbit_possible_no_trade_gap` because Upbit
 may omit intervals with no trades. This is still a data-quality warning, not an alert trigger.
 
@@ -253,8 +255,8 @@ Safety-priority alerts such as risk warnings and invalidations use a separate bo
 are not blocked by earlier watchlist alerts. Terminal Telegram/Discord authorization or destination
 failures are quarantined in local channel state until configuration is fixed.
 Upside alerts are suppressed for quarantined symbols, stale or incomplete candle data,
-low-liquidity candidates, candidates missing a usable benchmark or orderbook, and high scores
-driven by only one extreme component.
+low-liquidity candidates, candidates missing a usable benchmark or fresh orderbook, stale
+orderbook snapshots, and high scores driven by only one extreme component.
 Telegram, Discord, and digest payloads include the candidate data timestamp plus freshness in
 seconds/minutes so stale-data decisions are visible in the research output.
 Digest support is a disabled-by-default policy placeholder that can build a research-only preview

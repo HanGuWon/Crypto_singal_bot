@@ -1959,6 +1959,7 @@ def _score_research_from_store(
             else settings.min_quote_volume_binance_usdt
         ),
         max_spread_bps=settings.max_spread_bps,
+        max_orderbook_age_seconds=settings.max_orderbook_age_seconds,
     )
     run_id = str(uuid4())
     benchmark_symbol = f"{quote}-BTC" if exchange == "upbit" else f"BTC{quote}"

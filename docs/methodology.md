@@ -27,8 +27,8 @@ Feature groups:
 - Relative strength: asset return minus BTC benchmark return when available.
 - Market regime: one-hour BTC/benchmark return when available; neutral fallback when unavailable.
 - Liquidity: quote volume and spread when orderbook data exists.
-- Risk: stale data, failed quality, timestamp drift, wide spread, low liquidity, excess volatility,
-  wick risk.
+- Risk: stale data, failed quality, timestamp drift, stale or future-dated orderbook snapshots,
+  wide spread, low liquidity, excess volatility, wick risk.
 
 Each feature snapshot carries the closed candle timestamp and freshness in seconds from the data
 quality report. Ranked candidates, alert events, and digest rows expose the same freshness value so

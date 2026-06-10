@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
-from crypto_signal_bot.data.models import Candle, DataQualityReport, OrderBook
+from crypto_signal_bot.data.models import Candle, DataQualityReport, OrderBook, ensure_utc
 from crypto_signal_bot.features.indicators import (
     atr,
     ema,
@@ -36,6 +37,7 @@ def build_feature_snapshot(
     quality: DataQualityReport,
     benchmark_candles: list[Candle] | None = None,
     orderbook: OrderBook | None = None,
+    now_utc: datetime | None = None,
 ) -> FeatureSnapshot:
     closed = [candle for candle in candles if candle.is_closed]
     if not closed:
@@ -73,6 +75,10 @@ def build_feature_snapshot(
         upper_wick_ratio = (latest.high - max(latest.open, latest.close)) / latest_range
 
     spread_bps = orderbook.spread_bps if orderbook else None
+    orderbook_age_seconds, orderbook_timestamp_drift_seconds = _orderbook_freshness(
+        orderbook,
+        observed_at=ensure_utc(now_utc or datetime.now(tz=UTC)),
+    )
     atr_value = atr(highs, lows, closes, 14)
 
     values: dict[str, float | None] = {
@@ -94,6 +100,8 @@ def build_feature_snapshot(
         "benchmark_ret_1h": benchmark_ret_1h,
         "relative_strength_1h": relative_strength_1h,
         "spread_bps": spread_bps,
+        "orderbook_age_seconds": orderbook_age_seconds,
+        "orderbook_timestamp_drift_seconds": orderbook_timestamp_drift_seconds,
         "upper_wick_ratio": upper_wick_ratio,
     }
     return FeatureSnapshot(
@@ -119,3 +127,15 @@ def _volume_acceleration(quote_volumes: list[float]) -> float | None:
     long_avg = sum(quote_volumes[-long_window - short_window : -short_window]) / long_window
     expected = max(long_avg * short_window, 1e-12)
     return math.log((short_sum + 1e-12) / expected)
+
+
+def _orderbook_freshness(
+    orderbook: OrderBook | None,
+    *,
+    observed_at: datetime,
+) -> tuple[float | None, float | None]:
+    if orderbook is None:
+        return None, None
+    age_seconds = (observed_at - orderbook.event_time_utc).total_seconds()
+    timestamp_drift_seconds = abs(age_seconds) if age_seconds < 0 else None
+    return age_seconds, timestamp_drift_seconds

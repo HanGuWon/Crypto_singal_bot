@@ -11,6 +11,8 @@ CRITICAL_RISK_FLAGS = {
     "timestamp_drift",
     "low_liquidity",
     "wide_spread",
+    "stale_orderbook",
+    "orderbook_timestamp_drift",
     "symbol_quarantined",
     "insufficient_history",
     "inactive_market",
@@ -21,6 +23,7 @@ CRITICAL_RISK_FLAGS = {
 class RiskThresholds:
     min_quote_volume: float = 1_000.0
     max_spread_bps: float = 30.0
+    max_orderbook_age_seconds: float = 60.0
 
 
 def derive_risk_flags(
@@ -40,6 +43,12 @@ def derive_risk_flags(
     spread = snapshot.values.get("spread_bps")
     if spread is not None and spread > thresholds.max_spread_bps:
         flags.append("wide_spread")
+    orderbook_age_seconds = snapshot.values.get("orderbook_age_seconds")
+    if orderbook_age_seconds is not None:
+        if orderbook_age_seconds < 0:
+            flags.append("orderbook_timestamp_drift")
+        elif orderbook_age_seconds > thresholds.max_orderbook_age_seconds:
+            flags.append("stale_orderbook")
     quote_volume = snapshot.values.get("quote_volume")
     if quote_volume is not None and quote_volume < thresholds.min_quote_volume:
         flags.append("low_liquidity")

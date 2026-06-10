@@ -31,6 +31,8 @@ Collection policy:
   `--max-orderbook-symbols`.
 - Ranking uses the latest stored orderbook snapshot when present; otherwise the candidate carries an
   `orderbook_unavailable` research risk flag.
+- Ranking marks snapshots older than `MAX_ORDERBOOK_AGE_SECONDS` as `stale_orderbook` and snapshots
+  timestamped in the future as `orderbook_timestamp_drift`.
 
 Binance request weights are tracked from `X-MBX-USED-WEIGHT-1M`. HTTP 429 is retried with bounded
 backoff and `Retry-After` when present as seconds or an HTTP-date. HTTP 418 fails the client

@@ -59,6 +59,7 @@ class Settings:
     max_symbols_per_collect: int = 20
     max_orderbook_symbols_per_collect: int = 10
     orderbook_depth_limit: int = 20
+    max_orderbook_age_seconds: int = 60
     polling_interval_seconds: int = 300
 
     min_quote_volume_upbit_krw: float = 2_000_000_000.0
@@ -118,6 +119,8 @@ class Settings:
             raise ConfigError("EXIT_GUARD_REQUIRE_MANUAL_APPROVAL must remain true in this MVP.")
         if not self.exit_guard.require_symbol_whitelist:
             raise ConfigError("EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST must remain true in this MVP.")
+        if self.max_orderbook_age_seconds <= 0:
+            raise ConfigError("MAX_ORDERBOOK_AGE_SECONDS must be positive.")
         if self.exit_guard.telegram_enabled:
             raise ConfigError("Exit guard uses Discord-only alerts; Telegram is not allowed.")
         if self.exit_guard.max_orderbook_age_seconds <= 0:
@@ -162,6 +165,7 @@ def load_settings() -> Settings:
         max_symbols_per_collect=int(_env("MAX_SYMBOLS_PER_COLLECT", "20")),
         max_orderbook_symbols_per_collect=int(_env("MAX_ORDERBOOK_SYMBOLS_PER_COLLECT", "10")),
         orderbook_depth_limit=int(_env("ORDERBOOK_DEPTH_LIMIT", "20")),
+        max_orderbook_age_seconds=int(_env("MAX_ORDERBOOK_AGE_SECONDS", "60")),
         polling_interval_seconds=int(_env("POLLING_INTERVAL_SECONDS", "300")),
         min_quote_volume_upbit_krw=float(_env("MIN_QUOTE_VOLUME_UPBIT_KRW", "2000000000")),
         min_quote_volume_binance_usdt=float(_env("MIN_QUOTE_VOLUME_BINANCE_USDT", "2000000")),

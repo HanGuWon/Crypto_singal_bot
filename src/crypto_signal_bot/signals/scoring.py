@@ -29,11 +29,13 @@ class ScoringEngine:
         *,
         min_quote_volume: float = 1_000.0,
         max_spread_bps: float = 30.0,
+        max_orderbook_age_seconds: float = 60.0,
     ) -> None:
         self.weights = weights or ScoringWeights()
         self.risk_thresholds = RiskThresholds(
             min_quote_volume=min_quote_volume,
             max_spread_bps=max_spread_bps,
+            max_orderbook_age_seconds=max_orderbook_age_seconds,
         )
 
     def score(self, snapshot: FeatureSnapshot, *, source_run_id: str | None = None) -> SignalCandidate:
@@ -197,6 +199,10 @@ def _penalties(values: dict[str, float | None], risk_flags: list[str]) -> dict[s
         penalties["excessive_volatility"] = min((rv - 0.05) * 300, 15)
     if "wide_spread" in risk_flags:
         penalties["wide_spread"] = 20
+    if "stale_orderbook" in risk_flags:
+        penalties["stale_orderbook"] = 15
+    if "orderbook_timestamp_drift" in risk_flags:
+        penalties["orderbook_timestamp_drift"] = 20
     if "low_liquidity" in risk_flags:
         penalties["low_liquidity"] = 25
     if "upper_wick_reversal_risk" in risk_flags:
