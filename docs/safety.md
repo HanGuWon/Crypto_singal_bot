@@ -14,6 +14,9 @@ DISCORD_WEBHOOK_ENABLED=false
 ```
 
 Unsafe modes fail closed during config validation. There is no live trading code path in the MVP.
+Numeric environment values are parsed through config-owned validators, so malformed or unsafe
+threshold/rate-limit values fail with `ConfigError` before collection, scoring, or notification
+dispatch starts.
 
 The exchange safety guard uses explicit allowlists. Unknown endpoints are rejected by default.
 Private, account, execution, funding, deposit, and withdrawal paths are not part of the client

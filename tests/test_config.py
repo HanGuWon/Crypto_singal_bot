@@ -46,6 +46,32 @@ def test_unsafe_modes_fail_closed() -> None:
         Settings(max_orderbook_age_seconds=0).validate_safety()
 
 
+def test_invalid_numeric_environment_value_is_config_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("ALERT_TOP_N", "many")
+
+    with pytest.raises(ConfigError, match="ALERT_TOP_N must be an integer"):
+        load_settings()
+
+
+@pytest.mark.parametrize(
+    "settings,error",
+    [
+        (Settings(default_request_timeout_seconds=0), "DEFAULT_REQUEST_TIMEOUT_SECONDS must be positive"),
+        (Settings(max_symbols_per_collect=0), "MAX_SYMBOLS_PER_COLLECT must be positive"),
+        (Settings(min_quote_volume_binance_usdt=-1), "MIN_QUOTE_VOLUME_BINANCE_USDT must be zero or positive"),
+        (Settings(alert_score_threshold=101), "ALERT_SCORE_THRESHOLD must be between 0 and 100"),
+        (
+            Settings(alert_score_threshold=80, alert_exit_threshold=80),
+            "ALERT_EXIT_THRESHOLD must be lower than ALERT_SCORE_THRESHOLD",
+        ),
+        (Settings(alert_global_max_per_minute=0), "ALERT_GLOBAL_MAX_PER_MINUTE must be positive"),
+    ],
+)
+def test_invalid_numeric_config_ranges_fail_closed(settings: Settings, error: str) -> None:
+    with pytest.raises(ConfigError, match=error):
+        settings.validate_safety()
+
+
 def test_invalid_display_timezone_is_rejected() -> None:
     with pytest.raises(ConfigError):
         Settings(display_timezone="Not/A_Timezone").validate_safety()
