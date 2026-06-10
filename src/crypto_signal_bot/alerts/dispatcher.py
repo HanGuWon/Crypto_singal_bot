@@ -15,6 +15,12 @@ from crypto_signal_bot.notifications.noop import NoopNotifier
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class ClaimedOutboxRow:
+    id: str
+    retry_count: int
+
+
 @dataclass
 class NotificationDispatcher:
     notifications_enabled: bool = False
@@ -46,7 +52,7 @@ class NotificationDispatcher:
             for notifier in self.notifiers:
                 channel = getattr(notifier, "channel", "unknown")
                 destination = notifier_destination(notifier)
-                outbox_id = self._claim_outbox(event, channel, destination)
+                outbox_row = self._claim_outbox(event, channel, destination)
                 try:
                     suppression = (
                         self.channel_state_store.suppression_for(channel, destination)
@@ -59,7 +65,7 @@ class NotificationDispatcher:
                         result = notifier.send(event)
                         if self.channel_state_store is not None:
                             self.channel_state_store.record_result(channel, destination, result)
-                    self._complete_outbox(outbox_id, result)
+                    self._complete_outbox(outbox_row, result)
                     results.append((event, result))
                 except Exception as exc:  # Notification failures must remain isolated.
                     safe_error = redact_secrets(exc)
@@ -70,29 +76,36 @@ class NotificationDispatcher:
                         "unknown",
                         error_message=safe_error,
                     )
-                    self._complete_outbox(outbox_id, result)
+                    self._complete_outbox(outbox_row, result)
                     results.append((event, result))
         return results
 
-    def _claim_outbox(self, event: AlertEvent, channel: str, destination: str) -> str | None:
+    def _claim_outbox(self, event: AlertEvent, channel: str, destination: str) -> ClaimedOutboxRow | None:
         if self.outbox_store is None:
             return None
-        return self.outbox_store.claim_notification_outbox(
+        claimed = self.outbox_store.claim_notification_outbox(
             alert_event_id=event.alert_event_id,
             channel=channel,
             destination_hash=destination_hash(channel, destination),
             claimed_at_utc=datetime.now(tz=UTC).isoformat(),
         )
+        if claimed is None:
+            return None
+        outbox_id, retry_count = claimed
+        return ClaimedOutboxRow(id=outbox_id, retry_count=retry_count)
 
-    def _complete_outbox(self, outbox_id: str | None, result: NotificationResult) -> None:
-        if self.outbox_store is None or outbox_id is None:
+    def _complete_outbox(self, outbox_row: ClaimedOutboxRow | None, result: NotificationResult) -> None:
+        if self.outbox_store is None or outbox_row is None:
             return
         safe_result = result.to_safe_dict()
+        retry_count = outbox_row.retry_count
+        if _outbox_status(result) in {"failed_retryable", "failed_terminal"}:
+            retry_count += 1
         self.outbox_store.complete_notification_outbox(
-            outbox_id=outbox_id,
+            outbox_id=outbox_row.id,
             status=_outbox_status(result),
             completed_at_utc=datetime.now(tz=UTC).isoformat(),
-            retry_count=result.retry_count,
+            retry_count=retry_count,
             last_error_code=result.error_code,
             last_error_message=(
                 str(safe_result["error_message"]) if safe_result["error_message"] else None

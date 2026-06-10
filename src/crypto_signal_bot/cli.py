@@ -205,6 +205,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     outbox_drain = outbox_sub.add_parser("drain", help="Drain pending/retryable outbox rows.")
     outbox_drain.add_argument("--max", dest="max_rows", type=int, default=10)
+    outbox_drain.add_argument("--max-retries", type=int, default=3)
     outbox_drain.add_argument("--dry-run", action="store_true")
 
     runs = sub.add_parser("runs", help="Inspect saved research runs.")
@@ -1998,6 +1999,8 @@ def _notifications_outbox(args: argparse.Namespace, settings: Settings, store: S
 def _notifications_outbox_drain(args: argparse.Namespace, settings: Settings, store: SQLiteStore) -> int:
     if args.max_rows <= 0:
         raise ConfigError("notifications outbox drain --max must be positive.")
+    if args.max_retries <= 0:
+        raise ConfigError("notifications outbox drain --max-retries must be positive.")
     rows = _drainable_outbox_rows(store, limit=args.max_rows)
     if args.dry_run:
         _print_json(
@@ -2022,6 +2025,21 @@ def _notifications_outbox_drain(args: argparse.Namespace, settings: Settings, st
     delivered: list[dict[str, object]] = []
     skipped: list[dict[str, object]] = []
     for row in rows:
+        if _outbox_retry_limit_reached(row, max_retries=args.max_retries):
+            skipped.append(
+                _complete_undeliverable_outbox(
+                    store,
+                    row,
+                    status="failed_terminal",
+                    error_code="outbox_retry_limit_exceeded",
+                    error_message=(
+                        "Outbox row reached the configured drain retry limit before a "
+                        "matching delivery could succeed."
+                    ),
+                    increment_retry=False,
+                )
+            )
+            continue
         notifier = _matching_notifier(notifiers, str(row["channel"]), str(row["destination_hash"]))
         event = store.fetch_alert_event(str(row["alert_event_id"]))
         if event is None:
@@ -2074,8 +2092,9 @@ def _complete_undeliverable_outbox(
     status: str,
     error_code: str,
     error_message: str,
+    increment_retry: bool = True,
 ) -> dict[str, object]:
-    retry_count = int(row["retry_count"]) + 1
+    retry_count = int(row["retry_count"]) + (1 if increment_retry else 0)
     store.complete_notification_outbox(
         outbox_id=str(row["id"]),
         status=status,
@@ -2095,6 +2114,10 @@ def _complete_undeliverable_outbox(
         }
     )
     return skipped
+
+
+def _outbox_retry_limit_reached(row: Any, *, max_retries: int) -> bool:
+    return str(row["status"]) == "failed_retryable" and int(row["retry_count"]) >= max_retries
 
 
 def _score_from_store(

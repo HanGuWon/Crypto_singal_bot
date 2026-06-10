@@ -1245,12 +1245,12 @@ class SQLiteStore:
         channel: str,
         destination_hash: str,
         claimed_at_utc: str,
-    ) -> str | None:
+    ) -> tuple[str, int] | None:
         self.init_schema()
         with self.connect() as conn:
             row = conn.execute(
                 """
-                SELECT id FROM notification_outbox
+                SELECT id, retry_count FROM notification_outbox
                 WHERE alert_event_id=? AND channel=? AND destination_hash=?
                   AND status IN ('pending', 'failed_retryable')
                 """,
@@ -1259,6 +1259,7 @@ class SQLiteStore:
             if row is None:
                 return None
             outbox_id = str(row["id"])
+            retry_count = int(row["retry_count"])
             conn.execute(
                 """
                 UPDATE notification_outbox
@@ -1267,7 +1268,7 @@ class SQLiteStore:
                 """,
                 (claimed_at_utc, outbox_id),
             )
-        return outbox_id
+        return outbox_id, retry_count
 
     def list_notification_outbox(
         self,

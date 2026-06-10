@@ -189,6 +189,44 @@ def test_outbox_drain_records_undeliverable_rows(
     assert rows[no_notifier_id]["retry_count"] == 1
 
 
+def test_outbox_drain_terminalizes_rows_at_retry_limit(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "notifications.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("NOTIFICATIONS_ENABLED", "true")
+    store = SQLiteStore(db_path)
+    event = make_alert(alert_event_id="retry-limit-event")
+    store.insert_alert_event(event)
+    outbox_id = store.insert_notification_outbox(
+        alert_event_id=event.alert_event_id,
+        channel="discord",
+        destination_hash=destination_hash("discord", "https://discord.com/api/webhooks/123/secret"),
+        created_at_utc=datetime.now(tz=UTC).isoformat(),
+    )
+    store.complete_notification_outbox(
+        outbox_id=outbox_id,
+        status="failed_retryable",
+        completed_at_utc=datetime.now(tz=UTC).isoformat(),
+        retry_count=3,
+        last_error_code="notifier_unavailable",
+        last_error_message="No configured notifier matches.",
+        provider_response={},
+    )
+
+    assert main(["notifications", "outbox", "drain", "--max-retries", "3"]) == 0
+    output = capsys.readouterr().out
+    assert "outbox_retry_limit_exceeded" in output
+    assert "secret" not in output
+
+    rows = {row["id"]: row for row in store.list_notification_outbox()}
+    assert rows[outbox_id]["status"] == "failed_terminal"
+    assert rows[outbox_id]["last_error_code"] == "outbox_retry_limit_exceeded"
+    assert rows[outbox_id]["retry_count"] == 3
+
+
 def test_outbox_drain_requires_positive_max_and_respects_limit(
     tmp_path,
     monkeypatch,
@@ -210,6 +248,8 @@ def test_outbox_drain_requires_positive_max_and_respects_limit(
 
     assert main(["notifications", "outbox", "drain", "--max", "0", "--dry-run"]) == 2
     assert "must be positive" in capsys.readouterr().err
+    assert main(["notifications", "outbox", "drain", "--max-retries", "0", "--dry-run"]) == 2
+    assert "max-retries must be positive" in capsys.readouterr().err
 
     assert main(["notifications", "outbox", "drain", "--max", "1", "--dry-run"]) == 0
     payload = capsys.readouterr().out

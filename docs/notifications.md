@@ -56,7 +56,9 @@ Dedupe, cooldown, and hysteresis:
 - The outbox drain command records undeliverable rows instead of silently skipping them: missing
   alert payloads become terminal failures, while currently unavailable channel/destination matches
   remain retryable with an explicit error code.
-- Outbox drain `--max` must be positive, so manual or timer-based drains stay bounded.
+- Outbox drain `--max` and `--max-retries` must be positive, so manual or timer-based drains stay
+  bounded. `failed_retryable` rows that already reached `--max-retries` are terminalized with
+  `outbox_retry_limit_exceeded` before any provider call is attempted.
 - Digest support is a separate disabled-by-default policy path. `DigestPolicy` can build a
   research-only digest preview with top candidates and major score changes, but it does not dispatch
   provider messages and does not affect instant alert policy. Digest rows include candidate data

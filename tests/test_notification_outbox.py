@@ -29,6 +29,16 @@ class TerminalFailureNotifier:
         return NotificationResult("discord", "failed", "discord_webhook", error_code="404")
 
 
+class RetryableFailureNotifier:
+    channel = "telegram"
+
+    def destination_key(self) -> str:
+        return "chat-1:token"
+
+    def send(self, event):  # type: ignore[no-untyped-def]
+        return NotificationResult("telegram", "failed", "chat-1", error_code="500")
+
+
 def test_dispatcher_claims_and_completes_outbox_rows(tmp_path) -> None:
     store = SQLiteStore(tmp_path / "alerts.sqlite")
     event = make_alert(alert_event_id="event-1")
@@ -69,3 +79,26 @@ def test_terminal_failure_completes_outbox_as_failed_terminal(tmp_path) -> None:
         row = conn.execute("SELECT status, last_error_code FROM notification_outbox").fetchone()
     assert row["status"] == "failed_terminal"
     assert row["last_error_code"] == "404"
+
+
+def test_retryable_failure_increments_cumulative_outbox_retry_count(tmp_path) -> None:
+    store = SQLiteStore(tmp_path / "alerts.sqlite")
+    event = make_alert(alert_event_id="event-1")
+    notifier = RetryableFailureNotifier()
+    store.insert_alert_event(event)
+    store.insert_notification_outbox(
+        alert_event_id=event.alert_event_id,
+        channel=notifier.channel,
+        destination_hash=destination_hash(notifier.channel, notifier.destination_key()),
+        created_at_utc=datetime.now(tz=UTC).isoformat(),
+    )
+    dispatcher = NotificationDispatcher(True, [notifier], outbox_store=store)
+
+    dispatcher.dispatch_with_events([event])
+    dispatcher.dispatch_with_events([event])
+
+    with store.connect() as conn:
+        row = conn.execute("SELECT status, retry_count, last_error_code FROM notification_outbox").fetchone()
+    assert row["status"] == "failed_retryable"
+    assert row["retry_count"] == 2
+    assert row["last_error_code"] == "500"

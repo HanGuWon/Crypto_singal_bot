@@ -158,7 +158,7 @@ python -m crypto_signal_bot.cli notifications status
 python -m crypto_signal_bot.cli notifications channel-state list
 python -m crypto_signal_bot.cli notifications channel-state reset --channel discord --destination-hash HASH --confirm
 python -m crypto_signal_bot.cli notifications outbox list --status failed_retryable
-python -m crypto_signal_bot.cli notifications outbox drain --dry-run
+python -m crypto_signal_bot.cli notifications outbox drain --max 10 --max-retries 3 --dry-run
 ```
 
 Notification operations display destination hashes only. They do not print Telegram tokens or
@@ -310,7 +310,8 @@ checking real public Upbit/Binance API behavior.
 - Symbol health quarantine is conservative and local; it is intended to suppress weak research
   inputs, not to predict asset quality.
 - Notification delivery audit includes a CLI outbox drain path and optional systemd timer example,
-  but a long-running outbox worker/daemon is still a production follow-up.
+  including bounded retry terminalization, but a long-running outbox worker/daemon is still a
+  production follow-up.
 - Scoring is interpretable and deterministic but not a profit prediction.
 - Symbol identity normalization is implemented for Upbit and common Binance spot quote suffixes,
   but full cross-exchange asset mapping remains intentionally simple.
