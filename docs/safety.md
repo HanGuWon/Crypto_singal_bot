@@ -61,6 +61,8 @@ Protective exit guard note:
   exchange adapters or order submission.
 - The orderbook preflight uses public depth snapshots only and blocks dry-run review when the
   snapshot is missing, stale, shallow, or above the configured slippage threshold.
+- Protective exit alert events are Discord-only research events and remain gated by disabled-by-default
+  notification settings.
 - Any future private-account or execution safety feature is out of scope for this public-data MVP.
 - Such a feature would need a separate safety review and must stay outside the public-data
   screener path.

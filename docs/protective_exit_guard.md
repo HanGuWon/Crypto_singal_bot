@@ -52,6 +52,17 @@ For sell-only spot review and close-long futures review, the preflight walks pub
 close-short futures review, it walks public asks. The result is an assessment with `pass` or
 `blocked` status, estimated slippage, filled quantity, and risk flags for audit output.
 
+## Research Alert Event Boundary
+
+The phase-1 code can convert a protective exit signal and public orderbook preflight result into a
+structured `AlertEvent`. This is only an event-building boundary. Dispatch still goes through the
+existing notification dispatcher, remains disabled by default, and is valid only for Discord when
+the global Discord notification settings are explicitly enabled.
+
+Protective exit alert events include dry-run/manual-approval drivers and use event types such as
+`PROTECTIVE_EXIT_WATCH` and `PROTECTIVE_EXIT_BLOCKED`. A blocked public orderbook preflight is a
+warning event, not an execution instruction.
+
 ## Upbit Spot Sell-Only Shape
 
 A future Upbit protective action may only reduce an already-held spot asset. The only allowed
@@ -100,7 +111,8 @@ See `docs/discord_exit_alerts.md` for the dedicated notification boundary.
 
 ## Rollout Phases
 
-1. Design foundation only: config, models, validation, public orderbook preflight, documentation.
+1. Design foundation only: config, models, validation, public orderbook preflight, alert-event
+   boundary, documentation.
 2. Dry-run signal generation from closed public candles only.
 3. Private read adapters for balances/positions only, still no live orders.
 4. Exchange order-test or testnet-only validation, still no live orders.

@@ -6,6 +6,10 @@ from typing import Any
 from crypto_signal_bot.alerts.schemas import AlertEvent
 
 RESEARCH_WARNING = "Research alert only. Not financial advice. No order was placed."
+EXIT_GUARD_WARNING = (
+    "Protective exit guard alert. Risk-reduction only. Not financial advice. "
+    "No new position was opened. No order was placed."
+)
 FORBIDDEN_ALERT_WORDS = [
     "buy now",
     "guaranteed",
@@ -63,11 +67,12 @@ def format_discord_payload(
         {"name": "Data timestamp UTC", "value": event.data_timestamp_utc},
         {"name": "Data freshness", "value": _format_freshness(event.data_freshness_seconds), "inline": True},
     ]
-    description = RESEARCH_WARNING
+    warning = _warning_text(event)
+    description = warning
     validate_safe_message(description + " " + " ".join(str(field["value"]) for field in fields))
     payload: dict[str, Any] = {
         "username": username,
-        "content": RESEARCH_WARNING,
+        "content": warning,
         "embeds": [
             {
                 "title": f"{event.exchange.upper()} {event.symbol} {event.interval}",
@@ -84,10 +89,11 @@ def format_discord_payload(
 def _truncate_preserving_warning(text: str, *, max_length: int) -> str:
     if len(text) <= max_length:
         return text
-    suffix = "\n" + RESEARCH_WARNING
+    warning = EXIT_GUARD_WARNING if EXIT_GUARD_WARNING in text else RESEARCH_WARNING
+    suffix = "\n" + warning
     available = max_length - len(suffix) - 3
     if available < 0:
-        return RESEARCH_WARNING[:max_length]
+        return warning[:max_length]
     return text[:available].rstrip() + "..." + suffix
 
 
@@ -113,9 +119,15 @@ def _telegram_text(
         f"Drivers: {escape(drivers)}",
         f"Risk flags: {escape(risks)}",
         f"Invalidation: {escape(invalidation)}",
-        RESEARCH_WARNING,
+        _warning_text(event),
     ]
     return "\n".join(lines)
+
+
+def _warning_text(event: AlertEvent) -> str:
+    if event.event_type.startswith("PROTECTIVE_EXIT_"):
+        return EXIT_GUARD_WARNING
+    return RESEARCH_WARNING
 
 
 def _clip_text(value: str, max_length: int | None) -> str:

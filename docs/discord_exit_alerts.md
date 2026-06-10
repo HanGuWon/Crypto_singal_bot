@@ -1,7 +1,9 @@
 # Discord Exit Alerts
 
-This document covers future protective exit guard alerts only. The current MVP does not send exit
-guard alerts, does not call private exchange APIs, and does not submit orders.
+This document covers protective exit guard alert boundaries. The current MVP can build structured
+exit guard `AlertEvent` objects for research review, but it does not dispatch them unless global
+notifications and Discord exit guard alerts are explicitly enabled. It does not call private
+exchange APIs and does not submit orders.
 
 ## Channel Boundary
 
@@ -19,7 +21,7 @@ EXIT_GUARD_TELEGRAM_ENABLED=false
 
 ## Message Requirements
 
-Every future exit guard alert must include:
+Every exit guard alert payload must include:
 
 - exchange and symbol
 - position or balance context, if a future private-read phase is implemented
@@ -36,7 +38,15 @@ Protective exit guard alert.
 Risk-reduction only.
 Not financial advice.
 No new position was opened.
+No order was placed.
 ```
+
+Current event types are:
+
+- `PROTECTIVE_EXIT_WATCH`
+- `PROTECTIVE_EXIT_BLOCKED`
+
+Blocked events are warnings for research review only. They are not execution instructions.
 
 ## Mention Safety
 
