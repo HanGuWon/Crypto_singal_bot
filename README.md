@@ -229,7 +229,8 @@ python -m mypy src
 ```
 
 External API tests are not required by default. Use mocked CLI paths and unit tests for normal
-development.
+development. Tests marked `integration` are excluded by default; run `python -m pytest -m integration`
+only when intentionally checking real public API behavior.
 
 ## Known Limitations
 
