@@ -91,6 +91,8 @@ Example files are in `scripts/systemd/`:
 - `crypto-signal-bot-collect.timer`
 - `crypto-signal-bot-rank.service`
 - `crypto-signal-bot-rank.timer`
+- `crypto-signal-bot-outbox-drain.service`
+- `crypto-signal-bot-outbox-drain.timer`
 - `crypto-signal-bot-db-backup.service`
 - `crypto-signal-bot-db-backup.timer`
 
@@ -103,6 +105,11 @@ sudo systemctl enable --now crypto-signal-bot-collect.timer
 sudo systemctl enable --now crypto-signal-bot-rank.timer
 sudo systemctl enable --now crypto-signal-bot-db-backup.timer
 ```
+
+The outbox drain timer is optional. The service checks `NOTIFICATIONS_ENABLED` before doing any
+provider work and exits successfully without sending anything when notifications are disabled. If
+you later enable Telegram or Discord research alerts, keep the drain bounded, for example
+`notifications outbox drain --max 10`, so queued retry work cannot spam a channel.
 
 ## Backups And Logs
 

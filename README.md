@@ -276,8 +276,8 @@ checking real public Upbit/Binance API behavior.
 - Backtesting is a leakage-safe smoke engine, not a full portfolio simulator yet.
 - Symbol health quarantine is conservative and local; it is intended to suppress weak research
   inputs, not to predict asset quality.
-- Notification delivery audit includes a CLI outbox path, but a long-running outbox worker/daemon is
-  still a production follow-up.
+- Notification delivery audit includes a CLI outbox drain path and optional systemd timer example,
+  but a long-running outbox worker/daemon is still a production follow-up.
 - Scoring is interpretable and deterministic but not a profit prediction.
 - Symbol identity normalization is implemented for Upbit and common Binance spot quote suffixes,
   but full cross-exchange asset mapping remains intentionally simple.

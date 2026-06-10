@@ -48,6 +48,9 @@ notifications:
   telegram_enabled: false
   discord_webhook_enabled: false
   exit_guard_discord_alerts_enabled: false
+  outbox_drain_timer_enabled: false
+  outbox_drain_interval_seconds: 60
+  outbox_drain_max_rows: 10
 
 safety:
   live_trading_enabled: false

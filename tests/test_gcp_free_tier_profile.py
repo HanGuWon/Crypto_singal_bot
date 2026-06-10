@@ -17,6 +17,8 @@ def test_gcp_free_tier_profile_is_conservative() -> None:
     assert "notifications_enabled: false" in profile
     assert "live_trading_enabled: false" in profile
     assert "private_api_enabled: false" in profile
+    assert "outbox_drain_timer_enabled: false" in profile
+    assert "outbox_drain_max_rows: 10" in profile
     assert "exit_guard_live_exit_enabled: false" in profile
     assert "exit_guard_max_orderbook_age_seconds: 30" in profile
     assert "exit_guard_max_slippage_pct: 1.0" in profile
@@ -37,6 +39,8 @@ def test_gcp_free_tier_deployment_artifacts_exist() -> None:
         "scripts/systemd/crypto-signal-bot-collect.timer",
         "scripts/systemd/crypto-signal-bot-rank.service",
         "scripts/systemd/crypto-signal-bot-rank.timer",
+        "scripts/systemd/crypto-signal-bot-outbox-drain.service",
+        "scripts/systemd/crypto-signal-bot-outbox-drain.timer",
         "scripts/systemd/crypto-signal-bot-db-backup.service",
         "scripts/systemd/crypto-signal-bot-db-backup.timer",
     ]
@@ -54,5 +58,20 @@ def test_gcp_free_tier_docs_keep_safety_defaults_visible() -> None:
     assert "EXIT_GUARD_LIVE_EXIT_ENABLED=false" in docs
     assert "EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30" in docs
     assert "EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0" in docs
+    assert "notifications outbox drain --max 10" in docs
     assert "asia-northeast3" in docs
     assert "Always Free" in docs
+
+
+def test_gcp_outbox_drain_timer_is_bounded_and_disabled_safe() -> None:
+    service = (ROOT / "scripts" / "systemd" / "crypto-signal-bot-outbox-drain.service").read_text(
+        encoding="utf-8"
+    )
+    timer = (ROOT / "scripts" / "systemd" / "crypto-signal-bot-outbox-drain.timer").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'if [ "$NOTIFICATIONS_ENABLED" != "true" ]' in service
+    assert "skipping outbox drain" in service
+    assert "notifications outbox drain --max 10" in service
+    assert "OnUnitActiveSec=1min" in timer

@@ -1,0 +1,11 @@
+[Unit]
+Description=Drain Crypto Signal Bot notification outbox every minute
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Unit=crypto-signal-bot-outbox-drain.service
+
+[Install]
+WantedBy=timers.target
