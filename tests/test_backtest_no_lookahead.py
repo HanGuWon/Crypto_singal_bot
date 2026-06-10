@@ -109,6 +109,57 @@ def test_event_exposure_diagnostics_are_event_overlap_only() -> None:
     assert exposure["not_portfolio_exposure"] is True
 
 
+def test_stress_diagnostics_include_volatility_liquidity_benchmark_and_outage_slices() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {symbol: [50] for symbol in candles_by_symbol}
+    conditions = {
+        "BTCUSDT": {"risk_flags": ["api_outage"], "api_outage_simulated": True},
+        "ETHUSDT": {"risk_flags": []},
+        "ALPHAUSDT": {"risk_flags": []},
+    }
+
+    metrics = diagnostic_event_study(
+        candles_by_symbol,
+        signal_indices,
+        benchmark_symbol="BTCUSDT",
+        symbol_conditions=conditions,
+    )
+
+    stress = metrics["stress_diagnostics"]
+    assert stress["event_study_stress_only"] is True
+    assert stress["not_portfolio_simulator"] is True
+    assert "realized_volatility_median" in stress["thresholds"]
+    assert stress["high_volatility_windows"]["trades"] >= 1
+    assert stress["thin_liquidity_windows"]["trades"] >= 1
+    assert "benchmark_drawdown_windows" in stress
+    assert stress["api_outage_simulation"]["outage_flagged"]["trades"] == 1.0
+    assert stress["api_outage_simulation"]["excluding_outage_flagged"]["trades"] == 2.0
+
+
+def test_calibration_diagnostics_bucket_condition_scores() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {symbol: [50] for symbol in candles_by_symbol}
+    conditions = {
+        "BTCUSDT": {"score": 82.0},
+        "ETHUSDT": {"score": 71.0},
+        "ALPHAUSDT": {"score": 64.0},
+    }
+
+    metrics = diagnostic_event_study(
+        candles_by_symbol,
+        signal_indices,
+        benchmark_symbol="BTCUSDT",
+        symbol_conditions=conditions,
+    )
+
+    calibration = metrics["calibration_diagnostics"]
+    assert calibration["calibration_available"] is True
+    assert calibration["not_predictive_claim"] is True
+    assert calibration["score_buckets"]["80-89"]["trades"] == 1.0
+    assert calibration["score_buckets"]["70-79"]["trades"] == 1.0
+    assert calibration["score_buckets"]["60-69"]["trades"] == 1.0
+
+
 def test_quarantined_and_stale_symbols_are_conditioned_out() -> None:
     candles_by_symbol = _mock_universe(limit=100)
     signal_indices = {symbol: [50] for symbol in candles_by_symbol}

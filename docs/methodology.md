@@ -39,6 +39,11 @@ returns, deterministic random-symbol selection, and a point-in-time liquidity-ra
 turnover and exposure fields describe signal-window overlap only; they are not account exposure,
 allocation, or order execution.
 
+Stress diagnostics split the same event-study records into high-volatility, thin-liquidity,
+benchmark-drawdown, and API-outage-flagged windows. Calibration diagnostics bucket available
+condition scores against later event returns. These sections are audit aids only and do not claim
+predictive certainty.
+
 Entry timing research:
 
 - The original upside score remains the first-stage candidate score.

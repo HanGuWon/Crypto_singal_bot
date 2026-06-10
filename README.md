@@ -74,6 +74,8 @@ as hit rate, average win/loss, gain/loss factor, Sharpe, Sortino, max drawdown, 
 not a trading recommendation, not financial advice, and no order is placed. Diagnostic comparisons
 include BTC/universe context plus deterministic random-symbol and liquidity-ranked baselines using
 the same point-in-time windows.
+Stress and calibration sections summarize high-volatility, thin-liquidity, benchmark-drawdown,
+API-outage-flagged, and score-bucket windows when the required diagnostic inputs are available.
 `--from` and `--to` are applied as UTC candle-open bounds; date-only `--to` includes that full UTC
 calendar day.
 

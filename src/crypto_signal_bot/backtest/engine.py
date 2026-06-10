@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from itertools import product
 from statistics import median
@@ -66,6 +67,13 @@ def diagnostic_event_study(
         },
         "baseline_diagnostics": _baseline_diagnostics(candles_by_symbol, records),
         "event_exposure_diagnostics": _event_exposure_diagnostics(records, base_assumptions),
+        "stress_diagnostics": _stress_diagnostics(
+            candles_by_symbol,
+            records,
+            benchmark_symbol=benchmark_symbol,
+            assumptions=BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0),
+        ),
+        "calibration_diagnostics": _calibration_diagnostics(records),
         "sensitivity_grid": _sensitivity_grid(
             candles_by_symbol,
             signal_indices_by_symbol,
@@ -305,6 +313,161 @@ def _conditioned_results(records: list[dict[str, Any]]) -> dict[str, dict[str, f
             ]
         ),
     }
+
+
+def _stress_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    *,
+    benchmark_symbol: str | None,
+    assumptions: BacktestAssumptions,
+) -> dict[str, object]:
+    vol_rows = [
+        (record, volatility)
+        for record in records
+        if (
+            volatility := _prior_realized_volatility(
+                candles_by_symbol.get(str(record["symbol"]), []),
+                int(record["signal_index"]),
+            )
+        )
+        is not None
+    ]
+    volume_rows = [
+        (record, quote_volume)
+        for record in records
+        if (
+            quote_volume := _signal_quote_volume(
+                candles_by_symbol.get(str(record["symbol"]), []),
+                int(record["signal_index"]),
+            )
+        )
+        is not None
+    ]
+    benchmark_rows = _benchmark_stress_records(
+        candles_by_symbol,
+        records,
+        benchmark_symbol=benchmark_symbol,
+        assumptions=assumptions,
+    )
+    vol_threshold = median([value for _, value in vol_rows]) if vol_rows else None
+    volume_threshold = median([value for _, value in volume_rows]) if volume_rows else None
+    outage_records = [
+        record
+        for record in records
+        if record["condition"].get("api_outage_simulated") is True
+        or "api_outage" in record["condition"].get("risk_flags", [])
+    ]
+    return {
+        "event_study_stress_only": True,
+        "high_volatility_windows": summarize_returns(
+            [
+                record["return"]
+                for record, volatility in vol_rows
+                if vol_threshold is not None and volatility >= vol_threshold
+            ]
+        ),
+        "thin_liquidity_windows": summarize_returns(
+            [
+                record["return"]
+                for record, quote_volume in volume_rows
+                if volume_threshold is not None and quote_volume <= volume_threshold
+            ]
+        ),
+        "benchmark_drawdown_windows": summarize_returns(
+            [record["return"] for record, benchmark_return in benchmark_rows if benchmark_return < 0]
+        ),
+        "api_outage_simulation": {
+            "outage_flagged": summarize_returns([record["return"] for record in outage_records]),
+            "excluding_outage_flagged": summarize_returns([
+                record["return"]
+                for record in records
+                if record not in outage_records
+            ]),
+        },
+        "thresholds": {
+            "realized_volatility_median": vol_threshold,
+            "quote_volume_median": volume_threshold,
+            "benchmark_drawdown_return_below": 0.0,
+        },
+        "not_portfolio_simulator": True,
+    }
+
+
+def _prior_realized_volatility(candles: list[Candle], signal_index: int, lookback: int = 20) -> float | None:
+    if signal_index <= 0 or signal_index >= len(candles):
+        return None
+    start = max(1, signal_index - lookback + 1)
+    returns = [
+        candles[index].close / candles[index - 1].close - 1
+        for index in range(start, signal_index + 1)
+        if candles[index - 1].close > 0
+    ]
+    if not returns:
+        return None
+    mean = sum(returns) / len(returns)
+    variance = sum((ret - mean) ** 2 for ret in returns) / len(returns)
+    return math.sqrt(variance)
+
+
+def _signal_quote_volume(candles: list[Candle], signal_index: int) -> float | None:
+    if signal_index < 0 or signal_index >= len(candles):
+        return None
+    return candles[signal_index].quote_volume
+
+
+def _benchmark_stress_records(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    *,
+    benchmark_symbol: str | None,
+    assumptions: BacktestAssumptions,
+) -> list[tuple[dict[str, Any], float]]:
+    if benchmark_symbol is None or benchmark_symbol not in candles_by_symbol:
+        return []
+    benchmark = candles_by_symbol[benchmark_symbol]
+    output: list[tuple[dict[str, Any], float]] = []
+    for record in records:
+        ret = _window_return(benchmark, int(record["signal_index"]), assumptions)
+        if ret is not None:
+            output.append((record, ret))
+    return output
+
+
+def _calibration_diagnostics(records: list[dict[str, Any]]) -> dict[str, object]:
+    scored_records = [
+        (record, score)
+        for record in records
+        if (score := _record_score(record)) is not None
+    ]
+    buckets: dict[str, list[float]] = {}
+    for record, score in scored_records:
+        bucket_start = int(score // 10) * 10
+        bucket_end = min(bucket_start + 9, 100)
+        key = f"{bucket_start:02d}-{bucket_end:02d}"
+        buckets.setdefault(key, []).append(record["return"])
+    return {
+        "score_field": "condition.score",
+        "calibration_available": bool(scored_records),
+        "bucket_count": len(buckets),
+        "score_buckets": {
+            key: summarize_returns(values)
+            for key, values in sorted(buckets.items())
+        },
+        "not_predictive_claim": True,
+    }
+
+
+def _record_score(record: dict[str, Any]) -> float | None:
+    value = record["condition"].get("score")
+    if value is None:
+        value = record["condition"].get("research_priority_score")
+    if value is None:
+        return None
+    try:
+        return max(0.0, min(float(value), 100.0))
+    except (TypeError, ValueError):
+        return None
 
 
 def _event_exposure_diagnostics(
