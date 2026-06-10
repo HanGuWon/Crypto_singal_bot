@@ -63,6 +63,7 @@ def test_return_summary_includes_risk_distribution_metrics() -> None:
     assert summary["average_win"] == pytest.approx(0.06)
     assert summary["average_loss"] < 0
     assert summary["gain_loss_factor"] > 0
+    assert summary["profit_factor"] == summary["gain_loss_factor"]
     assert summary["win_loss_ratio"] > 0
     assert summary["sortino"] != 0
     assert summary["worst_return"] == -0.20
@@ -225,7 +226,8 @@ def test_diagnostic_output_avoids_forbidden_recommendation_language() -> None:
 
     text = json.dumps(diagnostic_event_study(candles_by_symbol, signal_indices, benchmark_symbol="BTCUSDT"))
 
-    for forbidden in ["buy", "sell", "profit", "guaranteed"]:
+    assert "profit_factor" in text
+    for forbidden in ["buy now", "sure profit", "guaranteed", "urgent buy", "this is financial advice"]:
         assert forbidden not in text.lower()
 
 

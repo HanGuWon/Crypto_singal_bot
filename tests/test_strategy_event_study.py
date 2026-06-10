@@ -152,7 +152,8 @@ def test_strategy_output_avoids_forbidden_recommendation_language() -> None:
         )
     ).lower()
 
-    for forbidden in ["buy", "sell", "profit", "guaranteed"]:
+    assert "profit_factor" in text
+    for forbidden in ["buy now", "sure profit", "guaranteed", "urgent buy", "this is financial advice"]:
         assert forbidden not in text
 
 

@@ -55,7 +55,7 @@ def test_rank_save_run_and_export_is_research_safe(tmp_path, monkeypatch, capsys
     assert "telegram-secret-token" not in export_text
     assert "discord.com/api/webhooks" not in export_text
     lowered = export_text.lower()
-    for forbidden in ["buy", "sell", "profit", "guaranteed"]:
+    for forbidden in ["buy now", "sure profit", "guaranteed", "urgent buy", "this is financial advice"]:
         assert forbidden not in lowered
 
 

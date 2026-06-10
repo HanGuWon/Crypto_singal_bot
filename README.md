@@ -73,8 +73,8 @@ Backtest output is marked with `diagnostic_event_study_only=true`,
 `not_portfolio_simulator=true`, `no_execution_model=true`, and `hypothetical_diagnostic_only=true`.
 The MVP backtest path is a leakage-safety diagnostic with next-candle entries, benchmark/universe
 context, cost sensitivity, data-quality-conditioned summaries, and return-distribution metrics such
-as hit rate, average win/loss, gain/loss factor, Sharpe, Sortino, max drawdown, and tail loss. It is
-not a trading recommendation, not financial advice, and no order is placed. Diagnostic comparisons
+as hit rate, average win/loss, gain/loss factor, profit factor, Sharpe, Sortino, max drawdown, and
+tail loss. It is not a trading recommendation, not financial advice, and no order is placed. Diagnostic comparisons
 include BTC/ETH benchmark-set context, universe context, and deterministic random-symbol and
 liquidity-ranked baselines using the same point-in-time windows. Walk-forward diagnostics use
 expanding prior windows before later evaluation windows.
