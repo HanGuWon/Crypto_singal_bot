@@ -55,7 +55,15 @@ def build_protective_exit_alert_event(
         invalidation_condition=EXIT_GUARD_INVALIDATION,
         data_timestamp_utc=signal.created_at_utc.isoformat(),
         data_freshness_seconds=round(data_freshness, 3),
-        dedupe_key=_dedupe_key(signal, event_type, drivers, risk_flags),
+        dedupe_key=make_protective_exit_dedupe_key(
+            exchange=signal.exchange,
+            symbol=signal.symbol,
+            interval=signal.interval,
+            event_type=event_type,
+            score=signal.exit_score,
+            drivers=drivers,
+            risk_flags=risk_flags,
+        ),
         source_run_id=signal.signal_id,
     )
 
@@ -102,16 +110,20 @@ def _risk_flags(
     return _unique(values)[:12]
 
 
-def _dedupe_key(
-    signal: ProtectiveExitSignal,
+def make_protective_exit_dedupe_key(
+    *,
+    exchange: str,
+    symbol: str,
+    interval: str,
     event_type: str,
+    score: float,
     drivers: list[str],
     risk_flags: list[str],
 ) -> str:
-    score_bucket = int(_bounded_score(signal.exit_score) // 5) * 5
-    material = "|".join(sorted([*drivers[:6], *(f"risk:{flag}" for flag in risk_flags[:6])]))
+    score_bucket = int(_bounded_score(score) // 5) * 5
+    material = "|".join(sorted([*drivers, *(f"risk:{flag}" for flag in risk_flags)]))
     material_hash = hashlib.sha256(material.encode("utf-8")).hexdigest()[:12]
-    return f"{signal.exchange}:{signal.symbol}:{signal.interval}:{event_type}:{score_bucket}:{material_hash}"
+    return f"{exchange}:{symbol}:{interval}:{event_type}:{score_bucket}:{material_hash}"
 
 
 def _bounded_score(value: float) -> float:

@@ -36,7 +36,7 @@ from crypto_signal_bot.data.symbol_health import assess_symbol_health
 from crypto_signal_bot.exchanges.base import PublicMarketDataClient
 from crypto_signal_bot.exchanges.binance import BinancePublicClient
 from crypto_signal_bot.exchanges.upbit import UpbitPublicClient
-from crypto_signal_bot.exit_guard.alerts import build_protective_exit_alert_event
+from crypto_signal_bot.exit_guard.alerts import build_protective_exit_alert_event, make_protective_exit_dedupe_key
 from crypto_signal_bot.exit_guard.models import (
     OrderBookSlippageAssessment,
     ProtectiveExitSignal,
@@ -1491,14 +1491,24 @@ def _exit_guard_event_with_approval_request(
 ) -> Any:
     request_id = str(approval_request["id"])
     scope = str(approval_request["approval_scope"])
+    drivers = _unique_strings(
+        [
+            *event.drivers,
+            f"manual_approval_request:{request_id}",
+            f"approval_scope:{scope}",
+        ]
+    )
     return replace(
         event,
-        drivers=_unique_strings(
-            [
-                *event.drivers,
-                f"manual_approval_request:{request_id}",
-                f"approval_scope:{scope}",
-            ]
+        drivers=drivers,
+        dedupe_key=make_protective_exit_dedupe_key(
+            exchange=event.exchange,
+            symbol=event.symbol,
+            interval=event.interval,
+            event_type=event.event_type,
+            score=event.score,
+            drivers=drivers,
+            risk_flags=event.risk_flags,
         ),
     )
 

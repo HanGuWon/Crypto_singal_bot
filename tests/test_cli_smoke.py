@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from crypto_signal_bot.cli import _filter_candles_by_date_range, main
 from crypto_signal_bot.data.collector import make_mock_candles
 from crypto_signal_bot.data.store import SQLiteStore
+from crypto_signal_bot.exit_guard.alerts import make_protective_exit_dedupe_key
 from crypto_signal_bot.notifications.base import NotificationResult
 
 
@@ -362,11 +363,22 @@ def test_cli_exit_guard_notify_uses_discord_only_when_enabled(tmp_path, monkeypa
 
     payload = json.loads(capsys.readouterr().out)
     approval_id = payload["manual_approval_request"]["id"]
+    alert_event = payload["alert_event"]
+    expected_dedupe_key = make_protective_exit_dedupe_key(
+        exchange=alert_event["exchange"],
+        symbol=alert_event["symbol"],
+        interval=alert_event["interval"],
+        event_type=alert_event["event_type"],
+        score=alert_event["score"],
+        drivers=alert_event["drivers"],
+        risk_flags=alert_event["risk_flags"],
+    )
     assert payload["notification_note"] == "dispatch_attempted_discord_only"
     assert payload["delivery_audit_count"] == 1
     assert payload["notification_results"][0]["channel"] == "discord"
     assert payload["notification_results"][0]["status"] == "delivered"
-    assert f"manual_approval_request:{approval_id}" in payload["alert_event"]["drivers"]
+    assert alert_event["dedupe_key"] == expected_dedupe_key
+    assert f"manual_approval_request:{approval_id}" in alert_event["drivers"]
     assert (
         f"manual_approval_request:{approval_id}"
         in payload["notification_results"][0]["provider_response"]["drivers"]
@@ -389,6 +401,7 @@ def test_cli_exit_guard_notify_uses_discord_only_when_enabled(tmp_path, monkeypa
     assert main(["exit-guard", "events", "show", payload["saved_alert_event_id"]]) == 0
     show_payload = json.loads(capsys.readouterr().out)
     assert f"manual_approval_request:{approval_id}" in show_payload["event"]["drivers"]
+    assert show_payload["event"]["dedupe_key"] == expected_dedupe_key
     assert show_payload["notification_deliveries"][0]["channel"] == "discord"
     assert show_payload["notification_deliveries"][0]["status"] == "delivered"
 

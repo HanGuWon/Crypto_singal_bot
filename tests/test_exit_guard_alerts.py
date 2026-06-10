@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from crypto_signal_bot.alerts.dispatcher import NotificationDispatcher
 from crypto_signal_bot.alerts.formatter import EXIT_GUARD_WARNING, FORBIDDEN_ALERT_WORDS, format_discord_payload
 from crypto_signal_bot.data.models import OrderBook, PriceLevel
-from crypto_signal_bot.exit_guard.alerts import build_protective_exit_alert_event
+from crypto_signal_bot.exit_guard.alerts import build_protective_exit_alert_event, make_protective_exit_dedupe_key
 from crypto_signal_bot.exit_guard.models import (
     ProtectiveExitSignal,
     RiskReducingOrderIntent,
@@ -91,3 +91,30 @@ def test_protective_exit_alert_dispatch_is_skipped_when_notifications_disabled()
     assert event.event_type == "PROTECTIVE_EXIT_WATCH"
     assert results[0].status == "skipped"
     assert results[0].error_message == "Notifications disabled."
+
+
+def test_protective_exit_dedupe_key_reflects_full_driver_material() -> None:
+    base = make_protective_exit_dedupe_key(
+        exchange="binance_usdm_futures",
+        symbol="BTCUSDT",
+        interval="5m",
+        event_type="PROTECTIVE_EXIT_WATCH",
+        score=35.0,
+        drivers=["dry_run_only", "manual_approval_required"],
+        risk_flags=[],
+    )
+    with_approval = make_protective_exit_dedupe_key(
+        exchange="binance_usdm_futures",
+        symbol="BTCUSDT",
+        interval="5m",
+        event_type="PROTECTIVE_EXIT_WATCH",
+        score=35.0,
+        drivers=[
+            "dry_run_only",
+            "manual_approval_required",
+            "manual_approval_request:exit-approval-1",
+        ],
+        risk_flags=[],
+    )
+
+    assert base != with_approval

@@ -32,6 +32,9 @@ Every exit guard alert payload must include:
 - manual approval request id when `--request-approval` created a pending audit record
 - research and safety warning
 
+When a manual approval request id is attached to an exit alert, the saved and dispatched event uses
+a dedupe key recomputed from that final driver set and risk-flag set.
+
 Required wording:
 
 ```text
