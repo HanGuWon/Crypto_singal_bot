@@ -243,6 +243,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Use a deterministic local public-orderbook fixture instead of the database.",
     )
     preflight.add_argument("--notify", action="store_true")
+    preflight.add_argument(
+        "--save-event",
+        action="store_true",
+        help="Persist the dry-run protective exit AlertEvent to the local audit table.",
+    )
     return parser
 
 
@@ -803,10 +808,11 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
     if max_slippage_pct <= 0:
         raise ConfigError("--max-slippage-pct must be positive.")
     now = utc_now()
+    store = SQLiteStore(settings.database_path)
     orderbook = (
         _mock_exit_guard_orderbook(args.exchange, args.symbol, now)
         if args.mock_orderbook
-        else SQLiteStore(settings.database_path).fetch_latest_orderbook(
+        else store.fetch_latest_orderbook(
             _store_exchange_for_exit_guard(args.exchange),
             args.symbol,
         )
@@ -832,6 +838,8 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
         data_quality_status="pass",
     )
     event = build_protective_exit_alert_event(signal, intent=intent, slippage=slippage, now=now)
+    if args.save_event:
+        store.insert_alert_event(event)
     notification_results: list[dict[str, object]] = []
     notification_note = "not_requested"
     if args.notify:
@@ -861,6 +869,8 @@ def _exit_guard_preflight(args: argparse.Namespace, settings: Settings) -> int:
             "orderbook_available": orderbook is not None,
             "slippage_assessment": _slippage_assessment_to_dict(slippage),
             "alert_event": event.to_dict(),
+            "saved_event": bool(args.save_event),
+            "saved_alert_event_id": event.alert_event_id if args.save_event else None,
             "notification_note": notification_note,
             "notification_results": notification_results,
             "research_warning": (

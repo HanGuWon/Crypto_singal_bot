@@ -148,6 +148,37 @@ def test_cli_exit_guard_uses_configured_preflight_thresholds(tmp_path, monkeypat
     assert "excessive_slippage" in payload["slippage_assessment"]["risk_flags"]
 
 
+def test_cli_exit_guard_can_save_preflight_event_to_audit_table(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    assert main(
+        [
+            "exit-guard",
+            "preflight",
+            "--exchange",
+            "upbit_spot",
+            "--symbol",
+            "KRW-BTC",
+            "--action",
+            "sell_only",
+            "--side",
+            "ask",
+            "--quantity",
+            "1",
+            "--mock-orderbook",
+            "--save-event",
+        ]
+    ) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    saved = SQLiteStore(db_path).fetch_alert_event(payload["saved_alert_event_id"])
+    assert payload["saved_event"] is True
+    assert saved is not None
+    assert saved.event_type == "PROTECTIVE_EXIT_WATCH"
+    assert saved.source_run_id == payload["alert_event"]["source_run_id"]
+
+
 def test_cli_rank_marks_insufficient_history(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("MIN_HISTORY_BARS", "120")

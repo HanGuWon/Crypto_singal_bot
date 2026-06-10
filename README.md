@@ -95,14 +95,15 @@ Protective exit guard dry-run preflight:
 
 ```bash
 python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook
-python -m crypto_signal_bot.cli exit-guard preflight --exchange upbit_spot --symbol KRW-BTC --action sell_only --side ask --quantity 0.01 --mock-orderbook --notify
+python -m crypto_signal_bot.cli exit-guard preflight --exchange upbit_spot --symbol KRW-BTC --action sell_only --side ask --quantity 0.01 --mock-orderbook --save-event --notify
 ```
 
 The preflight command builds a research JSON event from public orderbook data only. The `--notify`
 flag still does nothing unless global notifications, Discord webhook notifications, and
 `EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are explicitly configured. Default preflight thresholds
 are `EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30` and `EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0`; both can be
-overridden per dry-run command.
+overridden per dry-run command. `--save-event` persists the dry-run `AlertEvent` to the local audit
+table without sending a notification or placing an order.
 
 Database maintenance:
 
