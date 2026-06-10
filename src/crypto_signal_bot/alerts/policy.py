@@ -10,6 +10,10 @@ from crypto_signal_bot.alerts.state import AlertState, AlertStateStore, InMemory
 from crypto_signal_bot.signals.risk_filters import has_critical_risk
 from crypto_signal_bot.signals.schemas import SignalCandidate
 
+UPSIDE_ALERT_SUPPRESSION_FLAGS = {
+    "orderbook_unavailable",
+}
+
 
 @dataclass(frozen=True)
 class AlertPolicyConfig:
@@ -297,6 +301,8 @@ class AlertPolicy:
 
 def _eligible_for_upside_alert(candidate: SignalCandidate) -> bool:
     if candidate.entry_timing_status in {"falling_knife_suppress", "invalidated"}:
+        return False
+    if UPSIDE_ALERT_SUPPRESSION_FLAGS.intersection(candidate.risk_flags):
         return False
     if _has_single_extreme_component(candidate):
         return False

@@ -28,7 +28,7 @@ AlertPolicy handles:
 - stale and failed-quality suppression
 - closed-candle only suppression
 - single-extreme-component suppression
-- low-liquidity and wide-spread suppression
+- low-liquidity, wide-spread, and missing-orderbook suppression
 - symbol quarantine and missing-benchmark suppression
 
 Alert events and formatted messages carry both `data_timestamp_utc` and `data_freshness_seconds`.
