@@ -35,6 +35,8 @@ def test_cli_collect_and_rank_mock_json(tmp_path, monkeypatch, capsys) -> None: 
     assert payload["candidates"][0]["raw_symbol"] == payload["candidates"][0]["symbol"]
     assert payload["candidates"][0]["base_asset"]
     assert payload["candidates"][0]["quote_asset"] == "USDT"
+    assert payload["candidates"][0]["canonical_asset_id"]
+    assert payload["candidates"][0]["canonical_pair_id"].endswith("/USDT")
     assert "data_freshness_seconds" in payload["candidates"][0]
     assert payload["candidates"][0]["data_timestamp_display"].endswith("+09:00")
     assert payload["candidates"][0]["data_timestamp_display_timezone"] == "Asia/Seoul"

@@ -1,6 +1,9 @@
 # API Notes
 
 The MVP uses exchange-specific clients and public endpoints only.
+Symbols are normalized into exchange, raw symbol, base asset, quote asset, canonical asset id, and
+canonical pair id. For example, Upbit `KRW-BTC` and Binance `BTCUSDT` share canonical asset id
+`BTC` while retaining their exchange-specific raw symbols and quote assets.
 
 Upbit:
 

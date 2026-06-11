@@ -7,7 +7,7 @@ Data flow:
 ```text
 Public market data
   -> local SQLite candles
-  -> exchange/raw/base/quote symbol normalization
+  -> exchange/raw/base/quote symbol normalization with canonical asset and pair ids
   -> data quality checks
   -> closed-candle feature snapshot
   -> data freshness propagation

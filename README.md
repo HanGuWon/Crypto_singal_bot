@@ -236,7 +236,7 @@ large backtests, notifications, and exit guard execution by default.
 
 Each candidate includes:
 
-- exchange, symbol, raw symbol, base asset, quote asset, interval
+- exchange, symbol, raw symbol, base asset, quote asset, canonical asset id, canonical pair id, interval
 - current price
 - score from 0 to 100
 - component scores, including benchmark-aware market regime when benchmark data is available

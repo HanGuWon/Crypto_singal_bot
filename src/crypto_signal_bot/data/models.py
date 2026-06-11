@@ -34,6 +34,8 @@ class SymbolIdentity:
     raw_symbol: str
     base_asset: str
     quote_asset: str
+    canonical_asset_id: str
+    canonical_pair_id: str
 
 
 @dataclass(frozen=True)

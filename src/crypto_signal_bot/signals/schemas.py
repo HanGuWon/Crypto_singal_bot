@@ -25,6 +25,8 @@ class SignalCandidate:
     raw_symbol: str | None = None
     base_asset: str | None = None
     quote_asset: str | None = None
+    canonical_asset_id: str | None = None
+    canonical_pair_id: str | None = None
     symbol_health_status: str = "unknown"
     quarantine_reason: str | None = None
     history_bars_available: int = 0
@@ -45,6 +47,8 @@ class SignalCandidate:
             "raw_symbol": self.raw_symbol,
             "base_asset": self.base_asset,
             "quote_asset": self.quote_asset,
+            "canonical_asset_id": self.canonical_asset_id,
+            "canonical_pair_id": self.canonical_pair_id,
             "interval": self.interval,
             "current_price": self.current_price,
             "score": self.score,

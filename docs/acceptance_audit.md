@@ -56,7 +56,7 @@ successful run when this audit was introduced was:
 | Shallow orderbook snapshots with conservative caps | Proved | Collector flags, orderbook age checks, slippage/preflight tests |
 | SQLite local storage with migrations | Proved | `SQLiteStore`, migration tests, `db doctor` |
 | Upbit missing no-trade candles handled carefully | Implemented with MVP limitations | Data quality marks possible Upbit no-trade gaps instead of treating every gap as an API failure |
-| Cross-exchange canonical asset mapping | Implemented with MVP limitations | Symbol normalization exists, but full cross-exchange identity mapping remains simple |
+| Cross-exchange canonical asset mapping | Proved | `data/symbols.py` emits canonical asset/pair ids, ranked candidates expose them, symbol normalization tests |
 | WebSocket support | Intentional follow-up | REST-only MVP by design |
 
 ## Features, Scoring, And Ranking

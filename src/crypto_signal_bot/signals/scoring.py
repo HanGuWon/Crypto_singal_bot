@@ -77,6 +77,8 @@ class ScoringEngine:
             raw_symbol=identity.raw_symbol,
             base_asset=identity.base_asset,
             quote_asset=identity.quote_asset,
+            canonical_asset_id=identity.canonical_asset_id,
+            canonical_pair_id=identity.canonical_pair_id,
             interval=snapshot.interval,
             current_price=snapshot.current_price,
             score=round(score, 2),
@@ -131,6 +133,8 @@ class ScoringEngine:
             "quarantine_reason": candidate.quarantine_reason,
             "history_bars_available": candidate.history_bars_available,
             "benchmark_available": candidate.benchmark_available,
+            "canonical_asset_id": candidate.canonical_asset_id,
+            "canonical_pair_id": candidate.canonical_pair_id,
         }
 
 

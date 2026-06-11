@@ -23,6 +23,8 @@ def test_scoring_is_deterministic_and_bounded() -> None:
     assert first.raw_symbol == "ALPHAUSDT"
     assert first.base_asset == "ALPHA"
     assert first.quote_asset == "USDT"
+    assert first.canonical_asset_id == "ALPHA"
+    assert first.canonical_pair_id == "ALPHA/USDT"
     assert first.data_freshness_seconds == snapshot.data_freshness_seconds
     assert first.data_freshness_seconds is not None
 

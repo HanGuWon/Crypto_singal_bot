@@ -16,21 +16,38 @@ BINANCE_QUOTE_ASSETS = (
     "BRL",
 )
 
+CANONICAL_ASSET_ALIASES = {
+    "XBT": "BTC",
+    "BCC": "BCH",
+}
+
 
 def normalize_symbol(exchange: str, raw_symbol: str, *, quote_asset: str | None = None) -> SymbolIdentity:
     exchange_key = exchange.lower()
+    raw = raw_symbol.upper()
     if exchange_key == "upbit":
-        base, quote = _normalize_upbit(raw_symbol)
+        base, quote = _normalize_upbit(raw)
     elif exchange_key == "binance":
-        base, quote = _normalize_binance(raw_symbol, quote_asset=quote_asset)
+        base, quote = _normalize_binance(raw, quote_asset=quote_asset)
     else:
         raise ValueError(f"Unsupported exchange for symbol normalization: {exchange}")
+    canonical_base = canonical_asset_id(base)
+    canonical_quote = canonical_asset_id(quote)
     return SymbolIdentity(
         exchange=exchange_key,
-        raw_symbol=raw_symbol,
+        raw_symbol=raw,
         base_asset=base,
         quote_asset=quote,
+        canonical_asset_id=canonical_base,
+        canonical_pair_id=f"{canonical_base}/{canonical_quote}",
     )
+
+
+def canonical_asset_id(asset: str) -> str:
+    normalized = asset.strip().upper()
+    if not normalized:
+        raise ValueError("Asset cannot be empty.")
+    return CANONICAL_ASSET_ALIASES.get(normalized, normalized)
 
 
 def _normalize_upbit(raw_symbol: str) -> tuple[str, str]:
