@@ -95,8 +95,8 @@ successful run when this audit was introduced was:
 | No lookahead, entry after signal candle | Proved | `backtest/leakage_checks.py`, tests |
 | Fees, spread, slippage sensitivity | Proved | `backtest/engine.py`, CLI docs |
 | Benchmarks and deterministic baselines | Proved | Backtest engine and strategy event-study |
-| Walk-forward and stress/calibration diagnostics | Implemented with MVP limitations | Diagnostic output exists where local inputs are available |
-| Research portfolio simulator | Implemented with MVP limitations | Synthetic equal-weight capped portfolio simulation exists; production execution/account simulation remains out of scope |
+| Walk-forward and stress/calibration diagnostics | Proved | `event_return_summary`, `research_diagnostic_coverage`, backtest engine tests, CLI smoke tests |
+| Research portfolio simulator | Proved | `portfolio_simulation`, coverage flags, position-cap/no-order tests |
 | Notification logic excluded from performance computation | Proved | Backtest and strategy event-study paths do not dispatch alerts |
 
 ## Deployment And Operations

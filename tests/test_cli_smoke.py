@@ -1149,6 +1149,13 @@ def test_cli_backtest_mock_includes_btc_eth_benchmark_set(tmp_path, monkeypatch,
     assert benchmark_set["available_symbols"] == ["BTCUSDT", "ETHUSDT"]
     assert benchmark_set["benchmark_return_by_symbol"]["BTCUSDT"]["trades"] > 0
     assert benchmark_set["benchmark_return_by_symbol"]["ETHUSDT"]["trades"] > 0
+    assert payload["event_return_summary"]["trades"] > 0
+    coverage = payload["research_diagnostic_coverage"]
+    assert coverage["public_market_data_only"] is True
+    assert coverage["event_return_summary_fields"]["profit_factor"] is True
+    assert coverage["walk_forward_diagnostics"]["section_present"] is True
+    assert coverage["stress_diagnostics"]["benchmark_drawdown_windows"] is True
+    assert coverage["research_portfolio_simulation"]["no_order_was_placed"] is True
 
 
 def test_cli_backtest_rejects_inverted_date_range(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]

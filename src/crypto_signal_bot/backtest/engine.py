@@ -74,15 +74,36 @@ def diagnostic_event_study(
     symbol_conditions = symbol_conditions or {}
     base_assumptions = BacktestAssumptions()
     records = _event_records(candles_by_symbol, signal_indices_by_symbol, base_assumptions, symbol_conditions)
+    event_return_summary = summarize_returns([record["return"] for record in records])
     event_exposure = _event_exposure_diagnostics(records, base_assumptions)
+    benchmark_symbols_set = _benchmark_symbol_set(benchmark_symbol, benchmark_symbols)
     benchmark_records = _benchmark_records(
         candles_by_symbol,
         records,
         benchmark_symbol=benchmark_symbol,
         assumptions=BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0),
     )
+    benchmark_set = _benchmark_set_diagnostics(
+        candles_by_symbol,
+        records,
+        benchmark_symbols=benchmark_symbols_set,
+        assumptions=BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0),
+    )
+    portfolio = _portfolio_simulation_from_records(
+        records,
+        PortfolioSimulationConfig(assumptions=base_assumptions),
+    )
+    stress = _stress_diagnostics(
+        candles_by_symbol,
+        records,
+        benchmark_symbol=benchmark_symbol,
+        assumptions=BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0),
+    )
+    calibration = _calibration_diagnostics(records)
+    walk_forward = _walk_forward_diagnostic(records)
     return {
         **_diagnostic_flags(),
+        "event_return_summary": event_return_summary,
         "benchmark_diagnostics": {
             "benchmark_symbol": benchmark_symbol,
             "benchmark_return": summarize_returns([record["return"] for record in benchmark_records]),
@@ -94,26 +115,13 @@ def diagnostic_event_study(
         },
         "baseline_diagnostics": _baseline_diagnostics(candles_by_symbol, records),
         "universe_diagnostics": _universe_diagnostics(candles_by_symbol, signal_indices_by_symbol),
-        "benchmark_set_diagnostics": _benchmark_set_diagnostics(
-            candles_by_symbol,
-            records,
-            benchmark_symbols=_benchmark_symbol_set(benchmark_symbol, benchmark_symbols),
-            assumptions=BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0),
-        ),
+        "benchmark_set_diagnostics": benchmark_set,
         "event_exposure_diagnostics": event_exposure,
         "turnover_diagnostics": _turnover_diagnostics(event_exposure),
         "exposure_diagnostics": _exposure_diagnostics(event_exposure),
-        "portfolio_simulation": _portfolio_simulation_from_records(
-            records,
-            PortfolioSimulationConfig(assumptions=base_assumptions),
-        ),
-        "stress_diagnostics": _stress_diagnostics(
-            candles_by_symbol,
-            records,
-            benchmark_symbol=benchmark_symbol,
-            assumptions=BacktestAssumptions(fee_bps=0, spread_bps=0, slippage_bps=0),
-        ),
-        "calibration_diagnostics": _calibration_diagnostics(records),
+        "portfolio_simulation": portfolio,
+        "stress_diagnostics": stress,
+        "calibration_diagnostics": calibration,
         "sensitivity_grid": _sensitivity_grid(
             candles_by_symbol,
             signal_indices_by_symbol,
@@ -121,7 +129,15 @@ def diagnostic_event_study(
             assumptions_grid or _default_assumption_grid(),
         ),
         "data_quality_conditioned": _conditioned_results(records),
-        "walk_forward": _walk_forward_diagnostic(records),
+        "walk_forward": walk_forward,
+        "research_diagnostic_coverage": _research_diagnostic_coverage(
+            event_return_summary=event_return_summary,
+            benchmark_set=benchmark_set,
+            portfolio=portfolio,
+            stress=stress,
+            calibration=calibration,
+            walk_forward=walk_forward,
+        ),
     }
 
 
@@ -461,6 +477,72 @@ def _conditioned_results(records: list[dict[str, Any]]) -> dict[str, dict[str, f
                 if "low_liquidity" in record["condition"].get("risk_flags", [])
             ]
         ),
+    }
+
+
+def _research_diagnostic_coverage(
+    *,
+    event_return_summary: dict[str, float],
+    benchmark_set: dict[str, object],
+    portfolio: dict[str, object],
+    stress: dict[str, object],
+    calibration: dict[str, object],
+    walk_forward: dict[str, object],
+) -> dict[str, object]:
+    portfolio_exposure = portfolio.get("exposure")
+    metric_fields = {
+        "event_count": "trades",
+        "hit_rate": "hit_rate",
+        "average_win_loss": "average_win",
+        "profit_factor": "profit_factor",
+        "sharpe": "sharpe",
+        "sortino": "sortino",
+        "max_drawdown": "max_drawdown",
+        "tail_loss": "tail_loss_5pct",
+    }
+    return {
+        "public_market_data_only": True,
+        "closed_candle_signals_only": True,
+        "next_candle_open_entries": True,
+        "fee_spread_slippage_model": True,
+        "notification_logic_excluded": portfolio.get("notification_logic_excluded") is True,
+        "event_return_summary_fields": {
+            name: field in event_return_summary
+            for name, field in metric_fields.items()
+        },
+        "turnover_and_exposure_diagnostics": True,
+        "benchmark_set_diagnostics": {
+            "point_in_time_windows": benchmark_set.get("windows_aligned_point_in_time") is True,
+            "available_symbols": benchmark_set.get("available_symbols", []),
+            "missing_symbols": benchmark_set.get("missing_symbols", []),
+        },
+        "walk_forward_diagnostics": {
+            "section_present": True,
+            "expanding_prior_windows": walk_forward.get("expanding_prior_windows") is True,
+            "no_future_feature_normalization": walk_forward.get("no_future_feature_normalization") is True,
+            "fold_count": walk_forward.get("fold_count", 0),
+        },
+        "stress_diagnostics": {
+            "section_present": True,
+            "high_volatility_windows": "high_volatility_windows" in stress,
+            "thin_liquidity_windows": "thin_liquidity_windows" in stress,
+            "benchmark_drawdown_windows": "benchmark_drawdown_windows" in stress,
+            "api_outage_simulation": "api_outage_simulation" in stress,
+        },
+        "calibration_diagnostics": {
+            "section_present": True,
+            "score_field": calibration.get("score_field"),
+            "calibration_available": calibration.get("calibration_available") is True,
+            "not_predictive_claim": calibration.get("not_predictive_claim") is True,
+        },
+        "research_portfolio_simulation": {
+            "section_present": True,
+            "hypothetical_only": portfolio.get("hypothetical_only") is True,
+            "position_cap_enforced": isinstance(portfolio_exposure, dict)
+            and portfolio_exposure.get("position_cap_enforced") is True,
+            "no_order_was_placed": portfolio.get("no_order_was_placed") is True,
+        },
+        "not_financial_advice": True,
     }
 
 

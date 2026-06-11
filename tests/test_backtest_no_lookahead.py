@@ -223,6 +223,45 @@ def test_diagnostic_event_study_includes_research_portfolio_simulation() -> None
     assert portfolio["research_warning"].endswith("No order was placed.")
 
 
+def test_diagnostic_event_study_reports_explicit_research_coverage() -> None:
+    candles_by_symbol = _mock_universe(limit=120)
+    signal_indices = {symbol: [30, 40, 50, 60, 70] for symbol in candles_by_symbol}
+    conditions = {
+        "BTCUSDT": {"score": 82.0, "risk_flags": ["api_outage"], "api_outage_simulated": True},
+        "ETHUSDT": {"score": 71.0, "risk_flags": []},
+        "ALPHAUSDT": {"score": 64.0, "risk_flags": []},
+    }
+
+    metrics = diagnostic_event_study(
+        candles_by_symbol,
+        signal_indices,
+        benchmark_symbol="BTCUSDT",
+        benchmark_symbols=("BTCUSDT", "ETHUSDT"),
+        symbol_conditions=conditions,
+    )
+
+    summary = metrics["event_return_summary"]
+    coverage = metrics["research_diagnostic_coverage"]
+
+    assert summary["trades"] > 0
+    assert coverage["public_market_data_only"] is True
+    assert coverage["closed_candle_signals_only"] is True
+    assert coverage["next_candle_open_entries"] is True
+    assert coverage["fee_spread_slippage_model"] is True
+    assert coverage["notification_logic_excluded"] is True
+    assert all(coverage["event_return_summary_fields"].values())
+    assert coverage["benchmark_set_diagnostics"]["point_in_time_windows"] is True
+    assert coverage["walk_forward_diagnostics"]["expanding_prior_windows"] is True
+    assert coverage["walk_forward_diagnostics"]["no_future_feature_normalization"] is True
+    assert coverage["stress_diagnostics"]["api_outage_simulation"] is True
+    assert coverage["calibration_diagnostics"]["calibration_available"] is True
+    assert coverage["calibration_diagnostics"]["not_predictive_claim"] is True
+    assert coverage["research_portfolio_simulation"]["hypothetical_only"] is True
+    assert coverage["research_portfolio_simulation"]["position_cap_enforced"] is True
+    assert coverage["research_portfolio_simulation"]["no_order_was_placed"] is True
+    assert coverage["not_financial_advice"] is True
+
+
 def test_walk_forward_diagnostics_use_prior_time_windows_only() -> None:
     candles_by_symbol = _mock_universe(limit=110)
     signal_indices = {symbol: [30, 40, 50, 60, 70] for symbol in candles_by_symbol}

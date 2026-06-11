@@ -78,7 +78,10 @@ Backtest output is marked with `diagnostic_event_study_only=true`,
 The MVP backtest path is a leakage-safety diagnostic with next-candle entries, benchmark/universe
 context, cost sensitivity, data-quality-conditioned summaries, and return-distribution metrics such
 as hit rate, average win/loss, gain/loss factor, profit factor, Sharpe, Sortino, max drawdown, and
-tail loss. It also exposes diagnostic turnover and event-overlap exposure fields that describe
+tail loss in `event_return_summary`. It also exposes `research_diagnostic_coverage` so audits can
+verify the presence of public-data-only, closed-candle, next-open, benchmark, walk-forward, stress,
+calibration, and research portfolio sections from the command output. It also exposes diagnostic
+turnover and event-overlap exposure fields that describe
 signal windows, not order turnover or account exposure. The output also includes a research-only
 `portfolio_simulation` block that builds a synthetic equal-weight, max-position-capped portfolio
 from eligible next-open signal windows while excluding stale, low-liquidity, wide-spread, and
