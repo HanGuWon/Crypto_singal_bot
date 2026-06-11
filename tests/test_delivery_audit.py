@@ -43,6 +43,11 @@ def test_dispatcher_delivery_results_can_be_audited_in_sqlite(tmp_path) -> None:
         delivery_rows = conn.execute("SELECT * FROM notification_deliveries ORDER BY channel").fetchall()
 
     assert len(alert_rows) == 1
+    assert alert_rows[0]["current_price"] == event.current_price
+    assert alert_rows[0]["rank"] == event.rank
+    assert alert_rows[0]["data_timestamp_utc"] == event.data_timestamp_utc
+    assert alert_rows[0]["data_freshness_seconds"] == event.data_freshness_seconds
+    assert alert_rows[0]["notification_status"] == event.notification_status
     assert len(delivery_rows) == 2
     assert {row["status"] for row in delivery_rows} == {"delivered", "failed"}
     assert "secret" not in delivery_rows[0]["destination"]

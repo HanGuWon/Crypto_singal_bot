@@ -84,7 +84,7 @@ successful run when this audit was introduced was:
 | Discord safe `allowed_mentions` | Proved | `notifications/discord_webhook.py`, tests |
 | Alert policy suppresses stale, incomplete, low-liquidity, critical-risk candidates | Proved | `alerts/policy.py`, alert policy tests |
 | Cooldown, dedupe, hysteresis | Proved | Alert tests and SQLite state |
-| Outbox delivery audit and retry terminalization | Proved | Dispatcher/store/outbox CLI tests |
+| Outbox delivery audit and retry terminalization | Proved | Dispatcher/store/outbox CLI tests; `alert_events` stores key event metadata as searchable columns plus payload JSON |
 | Digest | Implemented with MVP limitations | Disabled policy path and local preview CLI, no scheduler daemon |
 | System/API failure events | Implemented with MVP limitations | CLI exchange failures create `SYSTEM_ERROR`; not every possible process failure is globally wrapped |
 

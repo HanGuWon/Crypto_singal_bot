@@ -37,6 +37,8 @@ AlertPolicy handles:
 Alert events and formatted messages carry both `data_timestamp_utc` and `data_freshness_seconds`.
 This makes freshness visible to downstream output adapters without letting notification code affect
 scoring or ranking.
+Saved `alert_events` also keep current price, rank, data timestamp, freshness seconds, and
+notification status as searchable SQLite columns while retaining the full structured payload JSON.
 When saved research runs are available, CLI notification evaluation uses the previous compatible
 exchange/quote/interval run snapshots for previous score, rank, and component-crossing context.
 

@@ -153,6 +153,17 @@ CREATE INDEX IF NOT EXISTS idx_notification_channel_state_channel_hash
 ON notification_channel_state(channel, destination_hash);
 """
 
+ALERT_EVENT_METADATA_SCHEMA = """
+ALTER TABLE alert_events ADD COLUMN current_price REAL;
+ALTER TABLE alert_events ADD COLUMN rank INTEGER;
+ALTER TABLE alert_events ADD COLUMN data_timestamp_utc TEXT;
+ALTER TABLE alert_events ADD COLUMN data_freshness_seconds REAL;
+ALTER TABLE alert_events ADD COLUMN notification_status TEXT NOT NULL DEFAULT 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_alert_events_data_timestamp
+ON alert_events(exchange, symbol, interval, data_timestamp_utc);
+"""
+
 SYMBOL_HEALTH_SCHEMA = """
 CREATE TABLE IF NOT EXISTS symbol_health (
   exchange TEXT NOT NULL,
@@ -313,6 +324,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(6, "manual_approval_requests", _split_sql_script(MANUAL_APPROVAL_SCHEMA)),
     Migration(7, "manual_approval_binding_hash", _split_sql_script(MANUAL_APPROVAL_BINDING_SCHEMA)),
     Migration(8, "protective_exit_signals", _split_sql_script(PROTECTIVE_EXIT_SIGNAL_SCHEMA)),
+    Migration(9, "alert_event_metadata_columns", _split_sql_script(ALERT_EVENT_METADATA_SCHEMA)),
 )
 
 REQUIRED_COLUMNS: dict[str, set[str]] = {
@@ -365,6 +377,11 @@ REQUIRED_COLUMNS: dict[str, set[str]] = {
         "drivers_json",
         "risk_flags_json",
         "invalidation",
+        "current_price",
+        "rank",
+        "data_timestamp_utc",
+        "data_freshness_seconds",
+        "notification_status",
         "payload_json",
         "dedupe_key",
         "source_run_id",
@@ -525,6 +542,7 @@ REQUIRED_INDEXES = {
     "idx_protective_exit_signals_lookup",
     "idx_manual_approval_status_expiry",
     "idx_manual_approval_binding",
+    "idx_alert_events_data_timestamp",
 }
 
 
@@ -1089,8 +1107,30 @@ class SQLiteStore:
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT OR IGNORE INTO alert_events VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT OR IGNORE INTO alert_events (
+                  id,
+                  created_at_utc,
+                  exchange,
+                  symbol,
+                  interval,
+                  event_type,
+                  severity,
+                  score,
+                  previous_score,
+                  confidence,
+                  drivers_json,
+                  risk_flags_json,
+                  invalidation,
+                  current_price,
+                  rank,
+                  data_timestamp_utc,
+                  data_freshness_seconds,
+                  notification_status,
+                  payload_json,
+                  dedupe_key,
+                  source_run_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["alert_event_id"],
@@ -1106,6 +1146,11 @@ class SQLiteStore:
                     json.dumps(payload["drivers"]),
                     json.dumps(payload["risk_flags"]),
                     payload["invalidation_condition"],
+                    payload["current_price"],
+                    payload["rank"],
+                    payload["data_timestamp_utc"],
+                    payload["data_freshness_seconds"],
+                    payload["notification_status"],
                     json.dumps(payload),
                     payload["dedupe_key"],
                     payload["source_run_id"],

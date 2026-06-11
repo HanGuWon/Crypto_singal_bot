@@ -46,6 +46,12 @@ def test_upgrade_from_pre_outbox_schema(tmp_path) -> None:
     assert _table_exists(db_path, "entry_timing_snapshots")
     assert _table_exists(db_path, "manual_approval_requests")
     assert _table_exists(db_path, "protective_exit_signals")
+    assert _column_exists(db_path, "alert_events", "current_price")
+    assert _column_exists(db_path, "alert_events", "rank")
+    assert _column_exists(db_path, "alert_events", "data_timestamp_utc")
+    assert _column_exists(db_path, "alert_events", "data_freshness_seconds")
+    assert _column_exists(db_path, "alert_events", "notification_status")
+    assert _index_exists(db_path, "idx_alert_events_data_timestamp")
 
 
 def test_upgrade_from_pre_channel_state_schema(tmp_path) -> None:
@@ -75,12 +81,14 @@ def test_upgrade_from_manual_approval_schema_without_binding_hash(tmp_path) -> N
 
     applied = store.run_migrations()
 
-    assert applied == [7, 8]
+    assert applied == [7, 8, 9]
     store.validate_schema()
     assert _column_exists(db_path, "manual_approval_requests", "binding_hash")
     assert _index_exists(db_path, "idx_manual_approval_binding")
     assert _table_exists(db_path, "protective_exit_signals")
     assert _index_exists(db_path, "idx_protective_exit_signals_lookup")
+    assert _column_exists(db_path, "alert_events", "notification_status")
+    assert _index_exists(db_path, "idx_alert_events_data_timestamp")
 
 
 def test_entry_timing_snapshot_insert_is_idempotent(tmp_path) -> None:
