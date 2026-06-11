@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -39,9 +39,83 @@ class AlertDigest:
         }
 
 
+@dataclass(frozen=True)
+class DigestScheduleStatus:
+    checked_at_utc: datetime
+    enabled: bool
+    interval_minutes: int
+    last_digest_at_utc: datetime | None
+    next_digest_at_utc: datetime | None
+    due: bool
+    notification_status: str
+    separate_policy_path: bool = True
+    scheduler_daemon_required: bool = False
+    no_notification_was_sent: bool = True
+    research_warning: str = "Research digest schedule status only. Not financial advice. No order was placed."
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "checked_at_utc": self.checked_at_utc.astimezone(UTC).isoformat(),
+            "enabled": self.enabled,
+            "interval_minutes": self.interval_minutes,
+            "last_digest_at_utc": (
+                None if self.last_digest_at_utc is None else self.last_digest_at_utc.astimezone(UTC).isoformat()
+            ),
+            "next_digest_at_utc": (
+                None if self.next_digest_at_utc is None else self.next_digest_at_utc.astimezone(UTC).isoformat()
+            ),
+            "due": self.due,
+            "notification_status": self.notification_status,
+            "separate_policy_path": self.separate_policy_path,
+            "scheduler_daemon_required": self.scheduler_daemon_required,
+            "no_notification_was_sent": self.no_notification_was_sent,
+            "research_warning": self.research_warning,
+        }
+
+
 class DigestPolicy:
     def __init__(self, config: DigestPolicyConfig | None = None) -> None:
         self.config = config or DigestPolicyConfig()
+
+    def schedule_status(
+        self,
+        *,
+        last_digest_at: datetime | None = None,
+        now: datetime | None = None,
+    ) -> DigestScheduleStatus:
+        now_utc = _as_utc(now or datetime.now(tz=UTC))
+        last_utc = None if last_digest_at is None else _as_utc(last_digest_at)
+        if not self.config.enabled:
+            return DigestScheduleStatus(
+                checked_at_utc=now_utc,
+                enabled=False,
+                interval_minutes=self.config.interval_minutes,
+                last_digest_at_utc=last_utc,
+                next_digest_at_utc=None,
+                due=False,
+                notification_status="disabled",
+            )
+        if last_utc is None:
+            return DigestScheduleStatus(
+                checked_at_utc=now_utc,
+                enabled=True,
+                interval_minutes=self.config.interval_minutes,
+                last_digest_at_utc=None,
+                next_digest_at_utc=now_utc,
+                due=True,
+                notification_status="due_no_previous_digest",
+            )
+        next_digest_at = last_utc + timedelta(minutes=self.config.interval_minutes)
+        due = now_utc >= next_digest_at
+        return DigestScheduleStatus(
+            checked_at_utc=now_utc,
+            enabled=True,
+            interval_minutes=self.config.interval_minutes,
+            last_digest_at_utc=last_utc,
+            next_digest_at_utc=next_digest_at,
+            due=due,
+            notification_status="due" if due else "not_due",
+        )
 
     def build_digest(
         self,
@@ -114,3 +188,9 @@ def _major_change(candidate: SignalCandidate, previous_score: float) -> dict[str
         "score_delta": round(candidate.score - previous_score, 4),
         "rank": candidate.rank,
     }
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)

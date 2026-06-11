@@ -85,7 +85,7 @@ successful run when this audit was introduced was:
 | Alert policy suppresses stale, incomplete, low-liquidity, critical-risk candidates | Proved | `alerts/policy.py`, alert policy tests |
 | Cooldown, dedupe, hysteresis | Proved | Alert tests and SQLite state |
 | Outbox delivery audit and retry terminalization | Proved | Dispatcher/store/outbox CLI tests; `alert_events` stores key event metadata as searchable columns plus payload JSON |
-| Digest | Implemented with MVP limitations | Disabled policy path and local preview CLI, no scheduler daemon |
+| Digest | Proved | Disabled policy path, local preview CLI, schedule-status placeholder, no-send tests |
 | System/API failure events | Proved | CLI exchange/API failures and unexpected runtime failures create redacted `SYSTEM_ERROR` events; system alert tests |
 
 ## Backtesting And Research Diagnostics

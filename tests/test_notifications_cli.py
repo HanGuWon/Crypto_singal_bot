@@ -64,6 +64,55 @@ def test_digest_preview_force_builds_without_sending(tmp_path, monkeypatch, caps
     assert SQLiteStore(db_path).notification_status_summary()["outbox"] == {}
 
 
+def test_digest_schedule_status_reports_due_without_sending(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "notifications.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("ALERT_DIGEST_ENABLED", "true")
+    monkeypatch.setenv("ALERT_DIGEST_INTERVAL_MINUTES", "60")
+
+    assert (
+        main([
+            "notifications",
+            "digest",
+            "schedule-status",
+            "--last-digest-at",
+            "2026-01-01T00:00:00+00:00",
+            "--now-utc",
+            "2026-01-01T01:00:00+00:00",
+        ])
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    schedule = payload["digest_schedule"]
+    assert schedule["enabled"] is True
+    assert schedule["due"] is True
+    assert schedule["notification_status"] == "due"
+    assert schedule["next_digest_at_utc"] == "2026-01-01T01:00:00+00:00"
+    assert schedule["separate_policy_path"] is True
+    assert schedule["scheduler_daemon_required"] is False
+    assert schedule["no_notification_was_sent"] is True
+    assert payload["research_warning"].endswith("No order was placed.")
+    assert SQLiteStore(db_path).notification_status_summary()["outbox"] == {}
+
+
+def test_digest_schedule_status_rejects_naive_timestamps(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "notifications.sqlite"))
+
+    assert (
+        main([
+            "notifications",
+            "digest",
+            "schedule-status",
+            "--last-digest-at",
+            "2026-01-01T00:00:00",
+        ])
+        == 2
+    )
+
+    assert "--last-digest-at must include a timezone offset" in capsys.readouterr().err
+
+
 def test_channel_state_list_uses_hashes_only(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     db_path = tmp_path / "notifications.sqlite"
     monkeypatch.setenv("DATABASE_PATH", str(db_path))

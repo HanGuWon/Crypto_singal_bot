@@ -257,6 +257,20 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Build a local preview even when ALERT_DIGEST_ENABLED=false. No notification is sent.",
     )
+    digest_schedule = digest_sub.add_parser(
+        "schedule-status",
+        help="Inspect digest scheduling status without sending notifications.",
+    )
+    digest_schedule.add_argument(
+        "--last-digest-at",
+        default=None,
+        help="Optional last digest UTC timestamp with timezone offset.",
+    )
+    digest_schedule.add_argument(
+        "--now-utc",
+        default=None,
+        help="Optional UTC timestamp override for deterministic audit checks.",
+    )
 
     channel_state = notification_sub.add_parser("channel-state", help="Inspect or reset channel quarantine.")
     channel_state_sub = channel_state.add_subparsers(dest="channel_state_command", required=True)
@@ -2104,6 +2118,8 @@ def _notifications(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _notifications_digest(args: argparse.Namespace, settings: Settings, store: SQLiteStore) -> int:
+    if args.digest_command == "schedule-status":
+        return _notifications_digest_schedule_status(args, settings)
     if args.digest_command != "preview":
         raise ConfigError(f"Unknown digest command: {args.digest_command}")
     if args.top is not None and args.top <= 0:
@@ -2168,6 +2184,46 @@ def _notifications_digest(args: argparse.Namespace, settings: Settings, store: S
         }
     )
     return 0
+
+
+def _notifications_digest_schedule_status(args: argparse.Namespace, settings: Settings) -> int:
+    status = DigestPolicy(
+        DigestPolicyConfig(
+            enabled=settings.alert_digest_enabled,
+            top_n=settings.alert_top_n,
+            interval_minutes=settings.alert_digest_interval_minutes,
+            major_score_delta=settings.alert_score_delta_threshold,
+        )
+    ).schedule_status(
+        last_digest_at=_parse_cli_utc_timestamp(args.last_digest_at, "--last-digest-at"),
+        now=_parse_cli_utc_timestamp(args.now_utc, "--now-utc"),
+    )
+    _print_json(
+        {
+            "digest_schedule": status.to_dict(),
+            "notifications_enabled": settings.notifications_enabled,
+            "telegram_enabled": settings.telegram_enabled,
+            "discord_webhook_enabled": settings.discord_webhook_enabled,
+            "notification_note": (
+                "Digest schedule status is a research-only placeholder. "
+                "It does not create outbox rows or send Telegram/Discord messages."
+            ),
+            "research_warning": "Research digest schedule status only. Not financial advice. No order was placed.",
+        }
+    )
+    return 0
+
+
+def _parse_cli_utc_timestamp(value: str | None, option_name: str) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ConfigError(f"{option_name} must be an ISO-8601 timestamp.") from exc
+    if parsed.tzinfo is None:
+        raise ConfigError(f"{option_name} must include a timezone offset.")
+    return parsed.astimezone(UTC)
 
 
 def _notifications_channel_state(args: argparse.Namespace, store: SQLiteStore) -> int:

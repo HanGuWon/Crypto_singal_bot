@@ -169,6 +169,7 @@ Notification operations:
 ```bash
 python -m crypto_signal_bot.cli notifications status
 python -m crypto_signal_bot.cli notifications digest preview --exchange binance --quote USDT --interval 5m --mock --force-preview
+python -m crypto_signal_bot.cli notifications digest schedule-status --last-digest-at 2026-01-01T00:00:00+00:00
 python -m crypto_signal_bot.cli notifications channel-state list
 python -m crypto_signal_bot.cli notifications channel-state reset --channel discord --destination-hash HASH --confirm
 python -m crypto_signal_bot.cli notifications outbox list --status failed_retryable
@@ -177,7 +178,9 @@ python -m crypto_signal_bot.cli notifications outbox drain --max 10 --max-retrie
 
 Notification operations display destination hashes only. They do not print Telegram tokens or
 Discord webhook URLs. Digest preview builds local JSON only; it never dispatches a provider
-message and `--force-preview` does not enable scheduled digest delivery.
+message and `--force-preview` does not enable scheduled digest delivery. Digest schedule status is
+a separate placeholder path that reports due/not-due state without creating outbox rows or sending
+Telegram/Discord messages.
 
 Research run reproducibility:
 
@@ -291,7 +294,8 @@ Telegram, Discord, and digest payloads include the candidate data timestamp plus
 seconds/minutes so stale-data decisions are visible in the research output.
 Digest support is a disabled-by-default policy path that can build a research-only preview from top
 candidates and major score changes. Use `notifications digest preview`; it does not dispatch
-messages by itself.
+messages by itself. Use `notifications digest schedule-status` to inspect the placeholder schedule
+state without sending provider messages or creating outbox rows.
 
 Telegram placeholders:
 
