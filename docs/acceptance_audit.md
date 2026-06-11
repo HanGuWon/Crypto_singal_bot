@@ -26,7 +26,8 @@ rg ...  # forbidden recommendation wording safety search
 uv run --with mypy mypy src
 ```
 
-The latest pushed CI run before this audit was:
+The current commit's CI result should be checked in GitHub Actions after every push. A previously
+successful run when this audit was introduced was:
 
 - https://github.com/HanGuWon/Crypto_singal_bot/actions/runs/27299681163
 
@@ -84,7 +85,7 @@ The latest pushed CI run before this audit was:
 | Alert policy suppresses stale, incomplete, low-liquidity, critical-risk candidates | Proved | `alerts/policy.py`, alert policy tests |
 | Cooldown, dedupe, hysteresis | Proved | Alert tests and SQLite state |
 | Outbox delivery audit and retry terminalization | Proved | Dispatcher/store/outbox CLI tests |
-| Digest | Implemented with MVP limitations | Disabled preview/policy placeholder, no scheduler daemon |
+| Digest | Implemented with MVP limitations | Disabled policy path and local preview CLI, no scheduler daemon |
 | System/API failure events | Implemented with MVP limitations | CLI exchange failures create `SYSTEM_ERROR`; not every possible process failure is globally wrapped |
 
 ## Backtesting And Research Diagnostics

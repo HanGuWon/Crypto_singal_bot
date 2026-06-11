@@ -67,6 +67,9 @@ Dedupe, cooldown, and hysteresis:
   research-only digest preview with top candidates and major score changes, but it does not dispatch
   provider messages and does not affect instant alert policy. Digest rows include candidate data
   timestamps and freshness seconds for auditability.
+- `notifications digest preview` can build a local JSON digest from stored or mocked public-market
+  candidates. If `ALERT_DIGEST_ENABLED=false`, it skips unless `--force-preview` is passed; even
+  forced previews do not create outbox rows or send Telegram/Discord messages.
 
 Telegram:
 

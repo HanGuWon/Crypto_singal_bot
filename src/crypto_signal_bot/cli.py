@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from crypto_signal_bot.alerts.channel_state import SQLiteNotificationChannelStateStore
 from crypto_signal_bot.alerts.delivery_log import delivery_record, suppressed_delivery_record
+from crypto_signal_bot.alerts.digest import DigestPolicy, DigestPolicyConfig
 from crypto_signal_bot.alerts.dispatcher import NotificationDispatcher
 from crypto_signal_bot.alerts.formatter import format_telegram_event
 from crypto_signal_bot.alerts.policy import AlertPolicy, AlertPolicyConfig
@@ -223,6 +224,29 @@ def _build_parser() -> argparse.ArgumentParser:
     notifications = sub.add_parser("notifications", help="Inspect notification state safely.")
     notification_sub = notifications.add_subparsers(dest="notifications_command", required=True)
     notification_sub.add_parser("status", help="Summarize notification outbox and channel state.")
+
+    digest = notification_sub.add_parser("digest", help="Build research-only digest previews.")
+    digest_sub = digest.add_subparsers(dest="digest_command", required=True)
+    digest_preview = digest_sub.add_parser("preview", help="Preview a research digest without sending it.")
+    digest_preview.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    digest_preview.add_argument("--quote", default=None)
+    digest_preview.add_argument("--interval", default="5m")
+    digest_preview.add_argument("--top", type=int, default=None)
+    digest_preview.add_argument(
+        "--mock",
+        action="store_true",
+        help="Seed deterministic fixture data before previewing.",
+    )
+    digest_preview.add_argument(
+        "--include-entry-timing",
+        action="store_true",
+        help="Include entry timing research fields in the preview scoring pass.",
+    )
+    digest_preview.add_argument(
+        "--force-preview",
+        action="store_true",
+        help="Build a local preview even when ALERT_DIGEST_ENABLED=false. No notification is sent.",
+    )
 
     channel_state = notification_sub.add_parser("channel-state", help="Inspect or reset channel quarantine.")
     channel_state_sub = channel_state.add_subparsers(dest="channel_state_command", required=True)
@@ -2025,11 +2049,80 @@ def _notifications(args: argparse.Namespace, settings: Settings) -> int:
             }
         )
         return 0
+    if args.notifications_command == "digest":
+        return _notifications_digest(args, settings, store)
     if args.notifications_command == "channel-state":
         return _notifications_channel_state(args, store)
     if args.notifications_command == "outbox":
         return _notifications_outbox(args, settings, store)
     raise ConfigError(f"Unknown notifications command: {args.notifications_command}")
+
+
+def _notifications_digest(args: argparse.Namespace, settings: Settings, store: SQLiteStore) -> int:
+    if args.digest_command != "preview":
+        raise ConfigError(f"Unknown digest command: {args.digest_command}")
+    if args.top is not None and args.top <= 0:
+        raise ConfigError("notifications digest preview --top must be positive.")
+
+    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    top_n = args.top or settings.alert_top_n
+    if args.mock:
+        store.upsert_candles(make_mock_candles(args.exchange, quote, args.interval, limit=160))
+
+    if not settings.alert_digest_enabled and not args.force_preview:
+        _print_json(
+            {
+                "digest_preview": None,
+                "digest_enabled": False,
+                "preview_forced": False,
+                "notification_status": "skipped_disabled",
+                "notification_note": "Digest preview skipped because ALERT_DIGEST_ENABLED=false.",
+                "research_warning": "Research digest preview only. Not financial advice. No order was placed.",
+            }
+        )
+        return 0
+
+    scored = _score_research_from_store(
+        store,
+        args.exchange,
+        quote,
+        args.interval,
+        top_n,
+        settings,
+        include_entry_timing=args.include_entry_timing,
+    )
+    candidates = rank_candidates([item.candidate for item in scored], top=top_n).candidates
+    previous_scores, _, _ = _previous_alert_policy_inputs(
+        store,
+        candidates,
+        current_run_id=None,
+        quote=quote,
+    )
+    digest = DigestPolicy(
+        DigestPolicyConfig(
+            enabled=True,
+            top_n=top_n,
+            interval_minutes=settings.alert_digest_interval_minutes,
+            major_score_delta=settings.alert_score_delta_threshold,
+        )
+    ).build_digest(candidates, previous_scores=previous_scores)
+    digest_payload = digest.to_dict() if digest is not None else None
+    if digest_payload is not None:
+        digest_payload["notification_status"] = "preview_only_not_sent"
+    _print_json(
+        {
+            "digest_preview": digest_payload,
+            "digest_enabled": settings.alert_digest_enabled,
+            "preview_forced": bool(args.force_preview),
+            "notifications_enabled": settings.notifications_enabled,
+            "notification_status": "preview_only_not_sent",
+            "notification_note": "Digest preview was built locally; no notification was sent.",
+            "candidate_count": len(candidates),
+            "previous_score_count": len(previous_scores),
+            "research_warning": "Research digest preview only. Not financial advice. No order was placed.",
+        }
+    )
+    return 0
 
 
 def _notifications_channel_state(args: argparse.Namespace, store: SQLiteStore) -> int:

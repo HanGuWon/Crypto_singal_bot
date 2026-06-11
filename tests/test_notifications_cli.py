@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from conftest import make_alert, make_candidate
@@ -16,6 +17,51 @@ def test_notifications_status_outputs_counts(tmp_path, monkeypatch, capsys) -> N
     output = capsys.readouterr().out
     assert "outbox" in output
     assert "channel_state" in output
+
+
+def test_digest_preview_skips_when_digest_disabled(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "notifications.sqlite"))
+
+    assert main(["notifications", "digest", "preview", "--exchange", "binance", "--quote", "USDT"]) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["digest_preview"] is None
+    assert payload["notification_status"] == "skipped_disabled"
+    assert payload["research_warning"].endswith("No order was placed.")
+
+
+def test_digest_preview_force_builds_without_sending(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "notifications.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("MIN_QUOTE_VOLUME_BINANCE_USDT", "0")
+
+    assert (
+        main([
+            "notifications",
+            "digest",
+            "preview",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--top",
+            "2",
+            "--mock",
+            "--force-preview",
+        ])
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    digest = payload["digest_preview"]
+    assert payload["preview_forced"] is True
+    assert payload["notification_status"] == "preview_only_not_sent"
+    assert digest["notification_status"] == "preview_only_not_sent"
+    assert len(digest["top_candidates"]) <= 2
+    assert digest["research_warning"].endswith("No order was placed.")
+    assert SQLiteStore(db_path).notification_status_summary()["outbox"] == {}
 
 
 def test_channel_state_list_uses_hashes_only(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
