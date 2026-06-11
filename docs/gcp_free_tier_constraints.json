@@ -1,0 +1,37 @@
+{
+  "checked_at_utc": "2026-06-11T00:00:00+00:00",
+  "official_doc_currentness_is_time_bounded": true,
+  "recheck_before_deploy": true,
+  "source_urls": {
+    "google_cloud_free_tier": "https://docs.cloud.google.com/free/docs/free-cloud-features",
+    "cloud_scheduler_pricing": "https://cloud.google.com/scheduler/pricing",
+    "cloud_run_pricing": "https://cloud.google.com/run/pricing",
+    "secret_manager_pricing": "https://cloud.google.com/secret-manager/pricing"
+  },
+  "compute_engine_always_free": {
+    "machine_type": "e2-micro",
+    "regions": [
+      "us-west1",
+      "us-central1",
+      "us-east1"
+    ],
+    "standard_persistent_disk_gb_month": 30,
+    "north_america_outbound_transfer_gb_month": 1,
+    "excluded_region_examples": [
+      "asia-northeast3"
+    ]
+  },
+  "cloud_scheduler": {
+    "free_jobs_per_month_per_billing_account": 3,
+    "free_tier_scope": "billing_account"
+  },
+  "cloud_run_jobs": {
+    "hourly_1vcpu_512mib_job_example_estimated_monthly_cost_usd": 0.0,
+    "sqlite_persistence_requires_storage_refactor": true
+  },
+  "secret_manager": {
+    "active_secret_versions_free_per_month": 6,
+    "access_operations_free_per_month": 10000,
+    "scheduled_secret_reads_can_consume_access_budget": true
+  }
+}

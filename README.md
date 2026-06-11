@@ -334,6 +334,8 @@ checking real public Upbit/Binance API behavior.
 
 - This is an MVP screener, not a production research platform.
 - Live collection is REST-only; WebSocket support is intentionally absent for now.
+- GCP pricing/free-tier constraints are time-boxed in `docs/gcp_free_tier_constraints.json`;
+  re-check official billing pages before creating resources.
 - Backtesting includes leakage-safe event studies and a small research-only synthetic portfolio
   simulation, but it is not a production execution or account simulator.
 - Symbol health quarantine is conservative and local; it is intended to suppress weak research

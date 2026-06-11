@@ -39,6 +39,10 @@ Relevant official pages:
 - [Cloud Run pricing](https://cloud.google.com/run/pricing)
 - [Secret Manager pricing](https://cloud.google.com/secret-manager/pricing)
 
+The same time-boxed constraints are mirrored in `docs/gcp_free_tier_constraints.json` so tests can
+verify that the deployment profile and this document keep the checked regions, limits, source URLs,
+and recheck requirement visible.
+
 Always check current billing pages before creating resources. Pricing and free-tier limits can
 change, and this document is only an operations guide for a small research deployment.
 
