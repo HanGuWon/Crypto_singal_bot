@@ -813,6 +813,75 @@ def test_cli_rank_can_include_entry_timing(tmp_path, monkeypatch, capsys) -> Non
     assert "research_priority_score" in candidate
 
 
+def test_cli_rank_can_include_multi_timeframe_entry_confirmation(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+    monkeypatch.setenv("MIN_QUOTE_VOLUME_BINANCE_USDT", "0")
+
+    assert (
+        main([
+            "rank",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--top",
+            "2",
+            "--format",
+            "json",
+            "--include-entry-timing",
+            "--confirmation-intervals",
+            "15m",
+            "--mock",
+        ])
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    candidate = payload["candidates"][0]
+
+    assert payload["entry_timeframe_alignment"]["status"] == "pass"
+    assert payload["entry_timeframe_alignment"]["timeframes"] == ["5m", "15m"]
+    assert candidate["entry_timing_status"] != "not_evaluated"
+    assert candidate["entry_timeframe_alignment"]["timeframes"] == ["5m", "15m"]
+    assert candidate["entry_confirmation_status"] in {"confirmed", "observed", "blocked", "not_ready"}
+    assert candidate["entry_confirmation_timeframes"] == ["15m"]
+    assert candidate["entry_confirmation_details"][0]["interval"] == "15m"
+    assert "multi_timeframe_confirmation_requested" in candidate["entry_confirmation_reason_codes"]
+    assert "buy now" not in json.dumps(payload).lower()
+
+
+def test_cli_rank_rejects_confirmation_intervals_without_entry_timing(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
+
+    assert (
+        main([
+            "rank",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--confirmation-intervals",
+            "15m",
+            "--mock",
+        ])
+        == 2
+    )
+
+    assert "--confirmation-intervals requires --include-entry-timing" in capsys.readouterr().err
+
+
 def test_cli_strategy_scan_mock_json(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("MIN_QUOTE_VOLUME_BINANCE_USDT", "0")

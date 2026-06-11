@@ -39,6 +39,12 @@ class SignalCandidate:
     entry_reason_codes: list[str] = field(default_factory=list)
     entry_risk_flags: list[str] = field(default_factory=list)
     entry_invalidation_condition: str | None = None
+    entry_timeframe_alignment: dict[str, object] | None = None
+    entry_confirmation_status: str = "not_requested"
+    entry_confirmation_timeframes: list[str] = field(default_factory=list)
+    entry_confirmation_reason_codes: list[str] = field(default_factory=list)
+    entry_confirmation_risk_flags: list[str] = field(default_factory=list)
+    entry_confirmation_details: list[dict[str, object]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -75,6 +81,12 @@ class SignalCandidate:
             "entry_reason_codes": self.entry_reason_codes,
             "entry_risk_flags": self.entry_risk_flags,
             "entry_invalidation_condition": self.entry_invalidation_condition,
+            "entry_timeframe_alignment": self.entry_timeframe_alignment,
+            "entry_confirmation_status": self.entry_confirmation_status,
+            "entry_confirmation_timeframes": self.entry_confirmation_timeframes,
+            "entry_confirmation_reason_codes": self.entry_confirmation_reason_codes,
+            "entry_confirmation_risk_flags": self.entry_confirmation_risk_flags,
+            "entry_confirmation_details": self.entry_confirmation_details,
         }
 
     def with_rank(self, rank: int) -> SignalCandidate:

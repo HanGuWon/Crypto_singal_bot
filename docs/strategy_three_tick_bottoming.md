@@ -62,7 +62,13 @@ Add entry timing fields to normal ranking:
 
 ```bash
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 20 --format json --include-entry-timing
+python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 20 --format json --include-entry-timing --confirmation-intervals 15m,30m --mock
 ```
+
+`rank --confirmation-intervals` validates the requested public candle intervals against the same
+UTC alignment policy used by `strategy scan`. Candidate JSON includes `entry_timeframe_alignment`,
+`entry_confirmation_status`, confirmation timeframes, reason/risk codes, and per-timeframe details.
+This confirmation layer does not change the original upside score or create notification events.
 
 Run a strategy scan across timeframes:
 

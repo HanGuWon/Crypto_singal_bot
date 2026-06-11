@@ -78,5 +78,7 @@ Entry timing research:
 - Three-tick and bottoming evidence describe whether a setup is not ready, forming, on watch,
   confirmed as a research candidate, reset, suppressed, or invalidated.
 - Stochastic is confirmation/invalidation evidence only, never a standalone signal.
+- Normal ranking can add aligned multi-timeframe confirmation summaries with
+  `--confirmation-intervals`; these summaries do not replace score, ranking, or alert policy.
 - Data-quality failures, incomplete candles, stale data, low liquidity, wide spreads, quarantined
   symbols, `falling_knife_suppress`, and `invalidated` prevent upside alerts.

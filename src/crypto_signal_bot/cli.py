@@ -204,6 +204,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Add second-stage entry timing research fields without replacing the upside score.",
     )
+    rank.add_argument(
+        "--confirmation-intervals",
+        default=None,
+        help="Comma-separated public candle intervals for entry timing confirmation, e.g. 15m,30m.",
+    )
 
     backtest = sub.add_parser("backtest", help="Run a minimal leakage-safe event-study smoke test.")
     backtest.add_argument("--exchange", choices=["upbit", "binance"], required=True)
@@ -699,8 +704,19 @@ def _quote_for_exit_guard_mock_symbol(exchange: str, symbol: str) -> str:
 def _rank(args: argparse.Namespace, settings: Settings) -> int:
     quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
     store = SQLiteStore(settings.database_path)
+    entry_timeframe_alignment = None
+    if args.confirmation_intervals is not None:
+        if not args.include_entry_timing:
+            raise ConfigError("--confirmation-intervals requires --include-entry-timing.")
+        entry_timeframe_alignment = _strategy_timeframe_alignment(args.interval, args.confirmation_intervals)
     if args.mock:
-        store.upsert_candles(make_mock_candles(args.exchange, quote, args.interval, limit=160))
+        mock_intervals = (
+            list(entry_timeframe_alignment.timeframes)
+            if entry_timeframe_alignment is not None
+            else [args.interval]
+        )
+        for mock_interval in mock_intervals:
+            store.upsert_candles(make_mock_candles(args.exchange, quote, mock_interval, limit=160))
     scored = _score_research_from_store(
         store,
         args.exchange,
@@ -709,6 +725,7 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
         args.top,
         settings,
         include_entry_timing=args.include_entry_timing,
+        entry_timeframe_alignment=entry_timeframe_alignment,
     )
     result = rank_candidates([item.candidate for item in scored], top=args.top)
     if args.save_run:
@@ -737,6 +754,8 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
             "research_warning": result.research_warning,
             "candidates": [_candidate_output_dict(candidate, settings) for candidate in result.candidates],
         }
+        if entry_timeframe_alignment is not None:
+            payload["entry_timeframe_alignment"] = entry_timeframe_alignment.to_dict()
         if args.save_run:
             payload["saved_run_id"] = result.source_run_id
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -2324,6 +2343,7 @@ def _score_research_from_store(
     *,
     include_entry_timing: bool = False,
     entry_strategy: str = "three_tick_bottoming",
+    entry_timeframe_alignment: EntryTimeframeAlignment | None = None,
 ) -> list[ScoredResearchCandidate]:
     symbols = store.list_symbols(exchange, quote, interval)
     if not symbols:
@@ -2386,6 +2406,16 @@ def _score_research_from_store(
                 quality,
                 strategy=entry_strategy,
             )
+            if entry_timeframe_alignment is not None:
+                candidate = _candidate_with_entry_timeframe_confirmation(
+                    store,
+                    candidate,
+                    exchange=exchange,
+                    symbol=symbol,
+                    settings=settings,
+                    alignment=entry_timeframe_alignment,
+                    strategy=entry_strategy,
+                )
         scored_candidates.append(
             ScoredResearchCandidate(
                 candidate=candidate,
@@ -2411,6 +2441,105 @@ def _candidate_with_entry_timing(
         quality=quality,
     )
     return apply_entry_timing_result(candidate, result)
+
+
+def _candidate_with_entry_timeframe_confirmation(
+    store: SQLiteStore,
+    candidate: SignalCandidate,
+    *,
+    exchange: str,
+    symbol: str,
+    settings: Settings,
+    alignment: EntryTimeframeAlignment,
+    strategy: str,
+) -> SignalCandidate:
+    details: list[dict[str, object]] = []
+    reason_codes = [
+        "multi_timeframe_confirmation_requested",
+        f"alignment_anchor:{alignment.anchor_minutes}m",
+    ]
+    risk_flags: list[str] = []
+    confirmation_timeframes = [interval for interval in alignment.timeframes if interval != candidate.interval]
+    for timeframe in confirmation_timeframes:
+        candles = store.fetch_candles(exchange, symbol, timeframe, limit=240)
+        quality = assess_candles(
+            candles,
+            timeframe,
+            max_staleness_seconds=settings.max_staleness_seconds,
+        )
+        if len(candles) < 25:
+            details.append(
+                {
+                    "interval": timeframe,
+                    "candle_count": len(candles),
+                    "data_quality_status": quality.status,
+                    "entry_timing_status": "insufficient_history",
+                    "entry_timing_score": None,
+                    "reason_codes": ["confirmation_insufficient_history"],
+                    "risk_flags": ["confirmation_insufficient_history"],
+                }
+            )
+            risk_flags.append(f"confirmation_insufficient_history:{timeframe}")
+            continue
+        confirmation_candidate = SignalCandidate(
+            **{
+                **candidate.to_dict(),
+                "interval": timeframe,
+                "data_quality_status": quality.status,
+                "data_freshness_seconds": quality.stale_seconds,
+                "is_closed_candle_signal": all(candle.is_closed for candle in candles[-1:]),
+            }
+        )
+        result = EntryTimingScorer(EntryTimingConfig(strategy=strategy)).score(
+            confirmation_candidate,
+            candles,
+            quality=quality,
+        )
+        details.append(
+            {
+                "interval": timeframe,
+                "candle_count": len(candles),
+                "data_quality_status": quality.status,
+                "entry_timing_status": result.status,
+                "entry_timing_score": result.entry_timing_score,
+                "reason_codes": result.reason_codes,
+                "risk_flags": result.risk_flags,
+            }
+        )
+        if result.status == "confirmed_candidate":
+            reason_codes.append(f"mtf_confirmed:{timeframe}")
+        elif result.status in {"watch", "forming"}:
+            reason_codes.append(f"mtf_observed:{timeframe}:{result.status}")
+        elif result.status in {"invalidated", "falling_knife_suppress"}:
+            risk_flags.append(f"mtf_blocked:{timeframe}:{result.status}")
+    status = _entry_confirmation_status(details, risk_flags)
+    return SignalCandidate(
+        **{
+            **candidate.to_dict(),
+            "entry_timeframe_alignment": alignment.to_dict(),
+            "entry_confirmation_status": status,
+            "entry_confirmation_timeframes": confirmation_timeframes,
+            "entry_confirmation_reason_codes": reason_codes,
+            "entry_confirmation_risk_flags": list(dict.fromkeys(risk_flags)),
+            "entry_confirmation_details": details,
+        }
+    )
+
+
+def _entry_confirmation_status(
+    details: list[dict[str, object]],
+    risk_flags: list[str],
+) -> str:
+    if not details:
+        return "not_requested"
+    statuses = {str(detail["entry_timing_status"]) for detail in details}
+    if "confirmed_candidate" in statuses:
+        return "confirmed"
+    if statuses.intersection({"watch", "forming"}):
+        return "observed"
+    if risk_flags:
+        return "blocked"
+    return "not_ready"
 
 
 def _assess_and_store_symbol_health(

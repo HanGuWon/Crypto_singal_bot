@@ -71,7 +71,7 @@ successful run when this audit was introduced was:
 | Entry timing layer from pasted notes | Implemented with MVP limitations | Stochastic, three-tick, bottoming, CLI `strategy scan`, docs |
 | Stochastic alone must not create a candidate | Proved | `signals/entry_timing.py`, `tests/test_entry_timing.py` |
 | Falling-knife suppression | Proved | `features/three_tick.py`, `features/bottoming.py`, tests |
-| Multi-timeframe confirmation | Implemented with MVP limitations | CLI and strategy event-study support alignment, but not a full live multi-timeframe scheduler |
+| Multi-timeframe confirmation | Proved | `rank --include-entry-timing --confirmation-intervals`, `strategy scan`, alignment validation, CLI tests |
 
 ## Alerts And Notifications
 

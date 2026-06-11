@@ -42,6 +42,7 @@ python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --save-run
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --include-entry-timing
+python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --include-entry-timing --confirmation-intervals 15m,30m --mock
 python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m,30m --strategy three_tick --top 20 --format json --mock
 python -m crypto_signal_bot.cli strategy event-study --exchange binance --quote USDT --interval 5m --horizons 1,3,6,12 --format json --mock
 ```
@@ -193,6 +194,9 @@ URLs, or exchange secrets.
 `rank --include-entry-timing` keeps the original upside score intact and adds a second-stage,
 closed-candle research view. This layer reports `entry_timing_status`, `entry_timing_score`,
 `research_priority_score`, strategy metadata, reason codes, and entry-specific risk flags.
+`--confirmation-intervals` can add aligned multi-timeframe confirmation summaries to the same
+ranked watchlist output. These summaries are metadata only; they do not replace the first-stage
+score, create alerts, or place orders.
 
 Supported statuses are:
 
