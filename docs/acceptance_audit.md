@@ -106,7 +106,7 @@ successful run when this audit was introduced was:
 | GCP free-tier conservative profile | Proved | `configs/gcp_free_tier.yaml`, `docs/deploy_gcp_free_tier.md` |
 | Systemd/logrotate/backup examples | Proved | `scripts/systemd`, `scripts/logrotate`, `scripts/sqlite_backup.sh` |
 | Notifications disabled in deployment profile | Proved | GCP profile and systemd outbox guard |
-| Pricing/current cloud constraints | Evidence gap | Docs warn users to check current pricing before creating resources |
+| Pricing/current cloud constraints | Implemented with MVP limitations | Dated official-doc check in `docs/deploy_gcp_free_tier.md`; users must still re-check billing pages |
 
 ## Protective Exit Guard Audit
 

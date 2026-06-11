@@ -70,6 +70,11 @@ def test_gcp_free_tier_docs_keep_safety_defaults_visible() -> None:
     assert "dry run" in docs
     assert "asia-northeast3" in docs
     assert "Always Free" in docs
+    assert "As of June 11, 2026" in docs
+    assert "3 free jobs per month" in docs
+    assert "10,000 access operations" in docs
+    assert "SQLite persistence issue" in docs
+    assert "Always check current billing pages" in docs
 
 
 def test_gcp_outbox_drain_timer_is_bounded_and_disabled_safe() -> None:

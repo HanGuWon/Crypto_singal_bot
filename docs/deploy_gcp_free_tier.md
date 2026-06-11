@@ -8,7 +8,7 @@ reference, not as runtime configuration automatically loaded by the app.
 
 ## Current Free-Tier Facts Checked
 
-As of June 10, 2026, Google Cloud's Free Tier documentation lists Compute Engine Always Free usage
+As of June 11, 2026, Google Cloud's Free Tier documentation lists Compute Engine Always Free usage
 for one non-preemptible `e2-micro` VM per month in these regions only:
 
 - `us-west1`
@@ -19,6 +19,19 @@ The same page lists 30 GB-months standard persistent disk and 1 GB outbound tran
 America to most destinations. It does not list Seoul (`asia-northeast3`) as an Always Free Compute
 Engine region.
 
+Cloud Scheduler pricing lists 3 free jobs per month per billing account. This is account-level, not
+project-level, so a small deployment should keep scheduled jobs sparse.
+
+Cloud Run pricing currently lists free monthly CPU/RAM allocations for jobs, and includes an example
+hourly 1 vCPU / 512 MiB job with an estimated monthly cost of $0.00 after free-tier discounts. This
+does not remove this repository's SQLite persistence issue; Cloud Run should still be treated as a
+later storage-refactor path rather than the first deployment target.
+
+Secret Manager pricing currently lists 6 active secret versions and 10,000 access operations per
+month as free usage limits. Scheduled jobs that read secrets every run can consume that access
+budget, so the VM profile keeps notifications disabled by default and favors a local `.env` file
+with restricted permissions for the initial setup.
+
 Relevant official pages:
 
 - [Google Cloud Free Tier](https://docs.cloud.google.com/free/docs/free-cloud-features)
@@ -26,7 +39,8 @@ Relevant official pages:
 - [Cloud Run pricing](https://cloud.google.com/run/pricing)
 - [Secret Manager pricing](https://cloud.google.com/secret-manager/pricing)
 
-Always check current billing pages before creating resources.
+Always check current billing pages before creating resources. Pricing and free-tier limits can
+change, and this document is only an operations guide for a small research deployment.
 
 ## Recommended MVP Shape
 
@@ -138,8 +152,9 @@ The logrotate example at `scripts/logrotate/crypto_signal_bot` assumes file logs
 
 Cloud Run Jobs can fit small scheduled workloads, and Google publishes examples where modest hourly
 jobs remain inside free allocations. This repository currently uses a local SQLite file, so a Cloud
-Run deployment should first move persistence to a durable external storage design. The VM profile is
-the simpler first deployment.
+Run deployment should first move persistence to a durable external storage design such as Cloud
+Storage, Firestore, Cloud SQL, or another explicitly reviewed store. The VM profile is the simpler
+first deployment.
 
 ## Secret Manager Note
 
