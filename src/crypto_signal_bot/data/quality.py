@@ -20,7 +20,15 @@ def assess_candles(
     now_utc = ensure_utc(now or utc_now())
     warnings: list[str] = []
     if not candles:
-        return DataQualityReport("fail", ["no_candles"], 0.0, None, None)
+        return DataQualityReport(
+            "fail",
+            ["no_candles"],
+            0.0,
+            None,
+            None,
+            gap_classification="unavailable",
+            gap_policy_reason="no candles supplied",
+        )
 
     open_times = [candle.open_time_utc for candle in candles]
     if len(open_times) != len(set(open_times)):
@@ -52,14 +60,15 @@ def assess_candles(
     unique_open_times = sorted(set(open_times))
     missing_candle_count, max_gap_intervals = _gap_counts(unique_open_times, interval_seconds)
     coverage = min(len(unique_open_times) / max(expected, 1), 1.0)
+    gap_classification = "complete"
+    gap_policy_reason: str | None = None
     if coverage < 0.95:
-        warnings.append(
-            _missing_candle_warning(
-                candles,
-                coverage=coverage,
-                max_gap_intervals=max_gap_intervals,
-            )
+        gap_classification, gap_policy_reason = _classify_gap(
+            candles,
+            coverage=coverage,
+            max_gap_intervals=max_gap_intervals,
         )
+        warnings.append(gap_classification)
 
     stale_seconds = (now_utc - latest.close_time_utc).total_seconds()
     if stale_seconds > max_staleness_seconds:
@@ -84,6 +93,8 @@ def assess_candles(
         missing_candle_count,
         max_gap_intervals,
         timestamp_drift_count,
+        gap_classification,
+        gap_policy_reason,
     )
 
 
@@ -107,17 +118,26 @@ def _gap_counts(open_times: list[datetime], interval_seconds: int) -> tuple[int,
     return missing, max_gap
 
 
-def _missing_candle_warning(
+def _classify_gap(
     candles: list[Candle],
     *,
     coverage: float,
     max_gap_intervals: int,
-) -> str:
+) -> tuple[str, str]:
     exchanges = {candle.exchange for candle in candles}
     if (
         exchanges == {"upbit"}
         and coverage >= UPBIT_NO_TRADE_GAP_COVERAGE_FLOOR
         and max_gap_intervals <= UPBIT_NO_TRADE_GAP_MAX_INTERVALS
     ):
-        return "upbit_possible_no_trade_gap"
-    return "missing_candles"
+        return (
+            "upbit_possible_no_trade_gap",
+            (
+                "Upbit may omit minute candles for intervals with no trades; small internal gaps "
+                "are tracked as warning-level observation gaps instead of hard missing-candle risk."
+            ),
+        )
+    return (
+        "missing_candles",
+        "Observed candle coverage or max gap exceeded the exchange-specific missing-candle policy.",
+    )

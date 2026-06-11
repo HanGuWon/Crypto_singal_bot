@@ -60,7 +60,9 @@ expensive polling loops. Ranking treats stored orderbook snapshots older than
 `MAX_ORDERBOOK_AGE_SECONDS` as `stale_orderbook` research risk instead of silently trusting the
 spread.
 For Upbit, small internal candle gaps can be marked as `upbit_possible_no_trade_gap` because Upbit
-may omit intervals with no trades. This is still a data-quality warning, not an alert trigger.
+may omit intervals with no trades. The quality payload also exposes `gap_classification` and
+`gap_policy_reason` so these cases are auditable. This is still a data-quality warning, not an
+alert trigger.
 
 Backtest smoke check:
 

@@ -33,7 +33,8 @@ Data-quality quarantine:
   inactive markets, and insufficient history are quarantined conservatively.
 - Upbit can omit candles when no trade occurred. Small internal Upbit gaps are marked as
   `upbit_possible_no_trade_gap` instead of `missing_candles`; this remains a data-quality warning
-  and does not create alert eligibility by itself.
+  and does not create alert eligibility by itself. Quality output also includes a gap
+  classification and policy reason for audit review.
 - Quarantined symbols can remain visible as research candidates with risk flags, but they cannot
   trigger upside alerts.
 - Missing benchmarks lower alert eligibility; this is a research-data-quality guard, not a market

@@ -659,6 +659,8 @@ def _data_quality_to_dict(quality: DataQualityReport) -> dict[str, object]:
         "missing_candle_count": quality.missing_candle_count,
         "max_gap_intervals": quality.max_gap_intervals,
         "timestamp_drift_count": quality.timestamp_drift_count,
+        "gap_classification": quality.gap_classification,
+        "gap_policy_reason": quality.gap_policy_reason,
     }
 
 

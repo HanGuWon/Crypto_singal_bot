@@ -62,6 +62,9 @@ def test_upbit_small_internal_gap_is_marked_possible_no_trade_gap() -> None:
     assert "missing_candles" not in report.warnings
     assert report.missing_candle_count == 1
     assert report.max_gap_intervals == 1
+    assert report.gap_classification == "upbit_possible_no_trade_gap"
+    assert report.gap_policy_reason is not None
+    assert "Upbit may omit minute candles" in report.gap_policy_reason
 
 
 def test_binance_internal_gap_is_marked_missing_candles() -> None:
@@ -74,6 +77,18 @@ def test_binance_internal_gap_is_marked_missing_candles() -> None:
     assert "missing_candles" in report.warnings
     assert "upbit_possible_no_trade_gap" not in report.warnings
     assert report.missing_candle_count == 1
+    assert report.gap_classification == "missing_candles"
+    assert report.gap_policy_reason is not None
+    assert "exchange-specific missing-candle policy" in report.gap_policy_reason
+
+
+def test_no_candles_exposes_unavailable_gap_classification() -> None:
+    report = assess_candles([], "1m")
+
+    assert report.status == "fail"
+    assert report.warnings == ["no_candles"]
+    assert report.gap_classification == "unavailable"
+    assert report.gap_policy_reason == "no candles supplied"
 
 
 def test_quality_flags_timestamp_drift() -> None:

@@ -273,6 +273,8 @@ def test_cli_exit_guard_signal_mock_outputs_and_saves_public_candle_event(
     assert payload["candle_source"] == "mock"
     assert payload["candle_count"] >= 60
     assert payload["data_quality"]["status"] == "pass"
+    assert payload["data_quality"]["gap_classification"] == "complete"
+    assert payload["data_quality"]["gap_policy_reason"] is None
     assert payload["signal"]["is_closed_candle_signal"] is True
     assert payload["signal"]["state"] in {
         "WATCHING",
@@ -331,6 +333,8 @@ def test_cli_exit_guard_signal_without_candles_safety_blocks(tmp_path, monkeypat
     assert payload["candle_source"] == "database"
     assert payload["candle_count"] == 0
     assert payload["data_quality"]["status"] == "fail"
+    assert payload["data_quality"]["gap_classification"] == "unavailable"
+    assert payload["data_quality"]["gap_policy_reason"] == "no candles supplied"
     assert payload["signal"]["state"] == "SAFETY_BLOCKED"
     assert payload["signal"]["data_quality_status"] == "fail"
     assert payload["alert_event"]["event_type"] == "PROTECTIVE_EXIT_BLOCKED"

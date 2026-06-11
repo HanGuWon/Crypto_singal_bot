@@ -139,6 +139,8 @@ class DataQualityReport:
     missing_candle_count: int = 0
     max_gap_intervals: int = 0
     timestamp_drift_count: int = 0
+    gap_classification: str = "complete"
+    gap_policy_reason: str | None = None
 
     @property
     def passed(self) -> bool:

@@ -33,6 +33,8 @@ Feature groups:
 Each feature snapshot carries the closed candle timestamp and freshness in seconds from the data
 quality report. Ranked candidates, alert events, and digest rows expose the same freshness value so
 research output can be audited without recomputing freshness inside notification adapters.
+The data-quality report also records gap classification and policy reason, distinguishing ordinary
+missing-candle risk from small Upbit no-trade observation gaps.
 UTC remains the internal storage and scoring timezone; CLI output adds separate display timestamps
 using `DISPLAY_TIMEZONE` for KST-facing review workflows.
 
