@@ -304,6 +304,7 @@ def _build_parser() -> argparse.ArgumentParser:
     strategy_scan.add_argument("--top", type=int, default=20)
     strategy_scan.add_argument("--format", choices=["table", "json"], default="table")
     strategy_scan.add_argument("--mock", action="store_true", help="Seed deterministic fixture data before scanning.")
+    strategy_scan.add_argument("--save-run", action="store_true", help="Persist strategy scan research artifacts.")
     strategy_event_study = strategy_sub.add_parser(
         "event-study",
         help="Compare research-only strategy variants with closed-candle, next-open diagnostics.",
@@ -867,25 +868,43 @@ def _strategy_scan(args: argparse.Namespace, settings: Settings) -> int:
         )
     candidates = _rank_by_research_priority([item.candidate for item in scored], top=args.top)
     research_warning = "Research watchlist only. Not financial advice. No order was placed."
-    if args.format == "json":
-        generated_at_utc = datetime.now(tz=UTC).isoformat()
-        _print_json(
-            {
-                "generated_at_utc": generated_at_utc,
-                "generated_at_display": _format_display_timestamp(
-                    generated_at_utc,
-                    settings.display_timezone,
-                ),
-                "display_timezone": settings.display_timezone,
-                "strategy": args.strategy,
-                "timeframes": intervals,
-                "timeframe_alignment": timeframe_alignment.to_dict(),
-                "research_warning": research_warning,
-                "candidates": [_candidate_output_dict(candidate, settings) for candidate in candidates],
-            }
+    generated_at_utc = datetime.now(tz=UTC).isoformat()
+    run_id = str(uuid4())
+    if args.save_run:
+        _save_research_run(
+            store,
+            result_candidates=candidates,
+            scored_candidates=scored,
+            settings=settings,
+            exchange=args.exchange,
+            quote=quote,
+            interval=args.base_interval,
+            mock_mode=bool(args.mock),
+            generated_at_utc=generated_at_utc,
+            research_warning=research_warning,
+            run_id=run_id,
         )
+    if args.format == "json":
+        payload: dict[str, object] = {
+            "generated_at_utc": generated_at_utc,
+            "generated_at_display": _format_display_timestamp(
+                generated_at_utc,
+                settings.display_timezone,
+            ),
+            "display_timezone": settings.display_timezone,
+            "strategy": args.strategy,
+            "timeframes": intervals,
+            "timeframe_alignment": timeframe_alignment.to_dict(),
+            "research_warning": research_warning,
+            "candidates": [_candidate_output_dict(candidate, settings) for candidate in candidates],
+        }
+        if args.save_run:
+            payload["saved_run_id"] = run_id
+        _print_json(payload)
     else:
         _print_table(candidates, display_timezone=settings.display_timezone)
+        if args.save_run:
+            print(f"Saved research run {run_id}.")
     return 0
 
 

@@ -44,6 +44,7 @@ python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --include-entry-timing
 python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --include-entry-timing --confirmation-intervals 15m,30m --mock
 python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m,30m --strategy three_tick --top 20 --format json --mock
+python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m --strategy three_tick_bottoming --top 20 --format json --mock --save-run
 python -m crypto_signal_bot.cli strategy event-study --exchange binance --quote USDT --interval 5m --horizons 1,3,6,12 --format json --mock
 ```
 
@@ -213,6 +214,8 @@ standalone signal. `falling_knife_suppress` and `invalidated` suppress upside al
 scan CLI ranks by `research_priority_score`, and the three-tick layer uses adaptive movement
 thresholds to avoid treating tiny bearish noise as separate ticks. It remains a research watchlist,
 not a trade instruction.
+`strategy scan --save-run` persists the strategy scan as a research run with feature snapshots and
+entry timing snapshots for audit/export.
 
 See `docs/strategy_three_tick_bottoming.md` for details.
 

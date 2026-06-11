@@ -80,5 +80,6 @@ Entry timing research:
 - Stochastic is confirmation/invalidation evidence only, never a standalone signal.
 - Normal ranking can add aligned multi-timeframe confirmation summaries with
   `--confirmation-intervals`; these summaries do not replace score, ranking, or alert policy.
+- `strategy scan --save-run` persists feature snapshots and entry timing snapshots for audit/export.
 - Data-quality failures, incomplete candles, stale data, low liquidity, wide spreads, quarantined
   symbols, `falling_knife_suppress`, and `invalidated` prevent upside alerts.

@@ -68,7 +68,7 @@ successful run when this audit was introduced was:
 | Deterministic interpretable 0-100 score | Proved | `signals/scoring.py`, `tests/test_scoring.py` |
 | Component scores, drivers, risk flags, confidence | Proved | `signals/schemas.py`, CLI smoke tests |
 | Closed-candle only signal generation | Proved | Data models, backtest leakage checks, entry timing tests |
-| Entry timing layer from pasted notes | Implemented with MVP limitations | Stochastic, three-tick, bottoming, CLI `strategy scan`, docs |
+| Entry timing layer from pasted notes | Proved | Stochastic, three-tick, bottoming, rank overlay, `strategy scan --save-run`, entry timing snapshots, tests |
 | Stochastic alone must not create a candidate | Proved | `signals/entry_timing.py`, `tests/test_entry_timing.py` |
 | Falling-knife suppression | Proved | `features/three_tick.py`, `features/bottoming.py`, tests |
 | Multi-timeframe confirmation | Proved | `rank --include-entry-timing --confirmation-intervals`, `strategy scan`, alignment validation, CLI tests |

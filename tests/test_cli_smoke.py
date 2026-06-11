@@ -920,6 +920,56 @@ def test_cli_strategy_scan_mock_json(tmp_path, monkeypatch, capsys) -> None:  # 
     assert "buy now" not in json.dumps(payload).lower()
 
 
+def test_cli_strategy_scan_can_save_entry_timing_research_run(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+    monkeypatch.setenv("MIN_QUOTE_VOLUME_BINANCE_USDT", "0")
+
+    assert (
+        main([
+            "strategy",
+            "scan",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--base-interval",
+            "5m",
+            "--timeframes",
+            "5m,15m",
+            "--strategy",
+            "three_tick_bottoming",
+            "--top",
+            "3",
+            "--format",
+            "json",
+            "--mock",
+            "--save-run",
+        ])
+        == 0
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    run_id = payload["saved_run_id"]
+    store = SQLiteStore(db_path)
+    run = store.get_research_run(run_id)
+    snapshots = store.get_entry_timing_snapshots(run_id)
+
+    assert run is not None
+    assert run["interval"] == "5m"
+    assert len(snapshots) == len(payload["candidates"])
+    assert snapshots[0]["strategy"] == "three_tick_bottoming"
+    assert json.loads(snapshots[0]["payload_json"])["research_warning"].endswith("No order was placed.")
+
+    assert main(["runs", "show", run_id]) == 0
+    show_payload = json.loads(capsys.readouterr().out)
+    assert show_payload["entry_timing_snapshot_count"] == len(snapshots)
+
+
 def test_cli_strategy_scan_rejects_unsupported_timeframe(tmp_path, monkeypatch, capsys) -> None:  # type: ignore[no-untyped-def]
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.sqlite"))
 

@@ -74,12 +74,15 @@ Run a strategy scan across timeframes:
 
 ```bash
 python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m,30m --strategy three_tick --top 20 --format json --mock
+python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m --strategy three_tick_bottoming --top 20 --format json --mock --save-run
 ```
 
 The strategy scan ranks by `research_priority_score`. The original upside `score` is still included
 for transparency. Strategy scans accept only the public candle intervals `1m`, `3m`, `5m`, `15m`,
 and `30m`, and the JSON output includes a `timeframe_alignment` block showing the UTC alignment
 anchor used for the requested interval set.
+When `--save-run` is present, the scan is persisted as a research run with feature snapshots and
+entry timing snapshots. This is an audit/export artifact only and does not dispatch notifications.
 
 Run a diagnostic strategy event study:
 
