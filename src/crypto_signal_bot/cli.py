@@ -136,13 +136,18 @@ def main(argv: list[str] | None = None) -> int:
         event_note = f" SYSTEM_ERROR alert_event_id={event_id}" if event_id else ""
         print(f"Exchange/API error: {redact_secrets(exc)}.{event_note}", file=sys.stderr)
         return 1
+    except Exception as exc:
+        event_id = _record_cli_system_error(args, settings, exc)
+        event_note = f" SYSTEM_ERROR alert_event_id={event_id}" if event_id else ""
+        print(f"System error: {redact_secrets(exc)}.{event_note}", file=sys.stderr)
+        return 1
     return 0
 
 
 def _record_cli_system_error(
     args: argparse.Namespace,
     settings: Settings,
-    error: ExchangeClientError,
+    error: Exception,
 ) -> str | None:
     try:
         store = SQLiteStore(settings.database_path)

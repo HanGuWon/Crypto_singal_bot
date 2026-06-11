@@ -72,6 +72,9 @@ Dedupe, cooldown, and hysteresis:
 - `notifications digest preview` can build a local JSON digest from stored or mocked public-market
   candidates. If `ALERT_DIGEST_ENABLED=false`, it skips unless `--force-preview` is passed; even
   forced previews do not create outbox rows or send Telegram/Discord messages.
+- CLI exchange/API failures and unexpected runtime failures are recorded as redacted
+  `SYSTEM_ERROR` events when the local audit database can be reached. Recording failure does not
+  retry provider notifications or place any order.
 
 Telegram:
 

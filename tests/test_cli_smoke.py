@@ -97,6 +97,53 @@ def test_cli_exchange_error_records_system_error_event(
     assert "not_trading_signal" in events[0].risk_flags
 
 
+def test_cli_unexpected_system_error_records_system_error_event(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:  # type: ignore[no-untyped-def]
+    db_path = tmp_path / "test.sqlite"
+    monkeypatch.setenv("DATABASE_PATH", str(db_path))
+
+    class FailingClient:
+        def get_markets(self, _quote: str) -> list[object]:
+            raise RuntimeError(
+                "boom https://discord.com/api/webhooks/123/secret "
+                "and https://api.telegram.org/bot123:ABC/sendMessage"
+            )
+
+    monkeypatch.setattr("crypto_signal_bot.cli._exchange_client", lambda _exchange, _settings: FailingClient())
+
+    assert (
+        main([
+            "collect",
+            "--exchange",
+            "binance",
+            "--quote",
+            "USDT",
+            "--interval",
+            "5m",
+            "--limit",
+            "10",
+        ])
+        == 1
+    )
+
+    stderr = capsys.readouterr().err
+    assert "System error" in stderr
+    assert "SYSTEM_ERROR alert_event_id=" in stderr
+    assert "123:ABC" not in stderr
+    assert "secret" not in stderr
+
+    events = SQLiteStore(db_path).list_alert_events(limit=5)
+    assert len(events) == 1
+    assert events[0].event_type == "SYSTEM_ERROR"
+    assert events[0].severity == "CRITICAL"
+    assert events[0].exchange == "binance"
+    assert events[0].symbol == "USDT"
+    assert "not_trading_signal" in events[0].risk_flags
+
+
 def test_cli_alert_test_records_audited_delivery_when_enabled(
     tmp_path,
     monkeypatch,
