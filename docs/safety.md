@@ -48,10 +48,11 @@ Research run exports:
 Backtest diagnostics:
 
 - Backtest output is a hypothetical diagnostic event study.
-- It uses next-candle entries for leakage checks but does not model execution or portfolio
-  management.
-- Output flags explicitly mark that it is not a portfolio simulator, not financial advice, and no
-  order was placed.
+- It uses next-candle entries for leakage checks.
+- The optional portfolio simulation is synthetic, equal-weight, max-position-capped, and
+  research-only. It does not model account balances, broker/exchange execution, live orders, or
+  private APIs.
+- Output flags explicitly mark that it is not financial advice and no order was placed.
 
 Entry timing research:
 

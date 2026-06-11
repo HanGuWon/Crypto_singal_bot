@@ -96,7 +96,7 @@ successful run when this audit was introduced was:
 | Fees, spread, slippage sensitivity | Proved | `backtest/engine.py`, CLI docs |
 | Benchmarks and deterministic baselines | Proved | Backtest engine and strategy event-study |
 | Walk-forward and stress/calibration diagnostics | Implemented with MVP limitations | Diagnostic output exists where local inputs are available |
-| Full portfolio simulator | Intentional follow-up | README marks backtest as diagnostic event study, not portfolio simulation |
+| Research portfolio simulator | Implemented with MVP limitations | Synthetic equal-weight capped portfolio simulation exists; production execution/account simulation remains out of scope |
 | Notification logic excluded from performance computation | Proved | Backtest and strategy event-study paths do not dispatch alerts |
 
 ## Deployment And Operations

@@ -802,8 +802,8 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
     )
     print(json.dumps(metrics, indent=2))
     print(
-        "Backtest diagnostic event-study only; it is not a portfolio simulator or financial advice. "
-        "No order was placed."
+        "Backtest diagnostic event-study and research-only portfolio simulation completed. "
+        "This is not financial advice. No order was placed."
     )
     return 0
 

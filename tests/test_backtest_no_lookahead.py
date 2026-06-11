@@ -5,7 +5,13 @@ from datetime import timedelta
 
 import pytest
 
-from crypto_signal_bot.backtest.engine import BacktestAssumptions, diagnostic_event_study, event_study_next_open
+from crypto_signal_bot.backtest.engine import (
+    BacktestAssumptions,
+    PortfolioSimulationConfig,
+    diagnostic_event_study,
+    event_study_next_open,
+    research_portfolio_simulation,
+)
 from crypto_signal_bot.backtest.leakage_checks import assert_next_candle_entry
 from crypto_signal_bot.backtest.metrics import summarize_returns
 from crypto_signal_bot.data.collector import make_mock_candles
@@ -158,6 +164,63 @@ def test_event_exposure_diagnostics_are_event_overlap_only() -> None:
     assert turnover["not_order_turnover"] is True
     assert explicit_exposure["max_overlapping_event_windows"] == exposure["max_overlapping_event_windows"]
     assert explicit_exposure["not_account_exposure"] is True
+
+
+def test_research_portfolio_simulation_enforces_position_cap_and_next_open_entries() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {symbol: [50] for symbol in candles_by_symbol}
+
+    result = research_portfolio_simulation(
+        candles_by_symbol,
+        signal_indices,
+        config=PortfolioSimulationConfig(max_positions=2),
+    )
+
+    assert result["research_portfolio_simulation"] is True
+    assert result["next_open_entries_only"] is True
+    assert result["closed_candle_signals_only"] is True
+    assert result["signals_considered"] == 3
+    assert result["selected_trades"] == 2
+    assert result["dropped_by_constraint"]["capacity_full"] == 1
+    assert result["exposure"]["position_cap_enforced"] is True
+    assert result["exposure"]["max_exposure_fraction"] <= 1.0
+    assert result["turnover"]["not_order_turnover"] is True
+    assert result["no_order_was_placed"] is True
+
+
+def test_research_portfolio_simulation_filters_risky_candidates() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {symbol: [50] for symbol in candles_by_symbol}
+    conditions = {
+        "BTCUSDT": {"data_quality_status": "pass", "risk_flags": [], "symbol_health_status": "healthy"},
+        "ETHUSDT": {"data_quality_status": "warn", "risk_flags": ["stale_data"], "symbol_health_status": "healthy"},
+        "ALPHAUSDT": {"data_quality_status": "pass", "risk_flags": [], "symbol_health_status": "quarantined"},
+    }
+
+    result = research_portfolio_simulation(
+        candles_by_symbol,
+        signal_indices,
+        symbol_conditions=conditions,
+        config=PortfolioSimulationConfig(max_positions=3),
+    )
+
+    assert result["selected_trades"] == 1
+    assert result["dropped_by_constraint"]["data_quality_not_pass"] == 1
+    assert result["dropped_by_constraint"]["symbol_quarantined"] == 1
+    assert result["return_summary"]["trades"] == 1.0
+
+
+def test_diagnostic_event_study_includes_research_portfolio_simulation() -> None:
+    candles_by_symbol = _mock_universe(limit=100)
+    signal_indices = {symbol: [50] for symbol in candles_by_symbol}
+
+    metrics = diagnostic_event_study(candles_by_symbol, signal_indices, benchmark_symbol="BTCUSDT")
+
+    portfolio = metrics["portfolio_simulation"]
+    assert portfolio["research_portfolio_simulation"] is True
+    assert portfolio["selected_trades"] > 0
+    assert portfolio["notification_logic_excluded"] is True
+    assert portfolio["research_warning"].endswith("No order was placed.")
 
 
 def test_walk_forward_diagnostics_use_prior_time_windows_only() -> None:

@@ -75,10 +75,13 @@ The MVP backtest path is a leakage-safety diagnostic with next-candle entries, b
 context, cost sensitivity, data-quality-conditioned summaries, and return-distribution metrics such
 as hit rate, average win/loss, gain/loss factor, profit factor, Sharpe, Sortino, max drawdown, and
 tail loss. It also exposes diagnostic turnover and event-overlap exposure fields that describe
-signal windows, not order turnover or account exposure. It is not a trading recommendation, not
-financial advice, and no order is placed. Diagnostic comparisons include BTC/ETH benchmark-set
-context, universe context, and deterministic random-symbol and liquidity-ranked baselines using the
-same point-in-time windows. Baselines also include a point-in-time top-volume equal-weight basket.
+signal windows, not order turnover or account exposure. The output also includes a research-only
+`portfolio_simulation` block that builds a synthetic equal-weight, max-position-capped portfolio
+from eligible next-open signal windows while excluding stale, low-liquidity, wide-spread, and
+quarantined candidates. It is not a trading recommendation, not financial advice, and no order is
+placed. Diagnostic comparisons include BTC/ETH benchmark-set context, universe context, and
+deterministic random-symbol and liquidity-ranked baselines using the same point-in-time windows.
+Baselines also include a point-in-time top-volume equal-weight basket.
 Walk-forward diagnostics use expanding prior windows before later evaluation windows.
 Universe diagnostics list requested symbols, evaluable symbols, empty candle symbols, and
 delisted-or-missing asset candidates where the local candle inputs make that detectable. They are
@@ -315,7 +318,8 @@ checking real public Upbit/Binance API behavior.
 
 - This is an MVP screener, not a production research platform.
 - Live collection is REST-only; WebSocket support is intentionally absent for now.
-- Backtesting is a leakage-safe smoke engine, not a full portfolio simulator yet.
+- Backtesting includes leakage-safe event studies and a small research-only synthetic portfolio
+  simulation, but it is not a production execution or account simulator.
 - Symbol health quarantine is conservative and local; it is intended to suppress weak research
   inputs, not to predict asset quality.
 - Notification delivery audit includes a CLI outbox drain path and optional systemd timer example,

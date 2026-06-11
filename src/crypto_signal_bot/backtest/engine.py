@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from itertools import product
 from statistics import median
 from typing import Any
@@ -23,6 +23,12 @@ class BacktestAssumptions:
         return (self.fee_bps + self.spread_bps + self.slippage_bps) / 10000
 
 
+@dataclass(frozen=True)
+class PortfolioSimulationConfig:
+    max_positions: int = 3
+    assumptions: BacktestAssumptions = field(default_factory=BacktestAssumptions)
+
+
 def event_study_next_open(
     candles: list[Candle],
     signal_indices: list[int],
@@ -35,6 +41,25 @@ def event_study_next_open(
     metrics.update(summarize_returns(returns))
     metrics.update(_diagnostic_flags())
     return metrics
+
+
+def research_portfolio_simulation(
+    candles_by_symbol: dict[str, list[Candle]],
+    signal_indices_by_symbol: dict[str, list[int]],
+    *,
+    symbol_conditions: dict[str, dict[str, Any]] | None = None,
+    config: PortfolioSimulationConfig | None = None,
+) -> dict[str, object]:
+    config = config or PortfolioSimulationConfig()
+    if config.max_positions <= 0:
+        raise ValueError("max_positions must be positive.")
+    records = _event_records(
+        candles_by_symbol,
+        signal_indices_by_symbol,
+        config.assumptions,
+        symbol_conditions or {},
+    )
+    return _portfolio_simulation_from_records(records, config)
 
 
 def diagnostic_event_study(
@@ -78,6 +103,10 @@ def diagnostic_event_study(
         "event_exposure_diagnostics": event_exposure,
         "turnover_diagnostics": _turnover_diagnostics(event_exposure),
         "exposure_diagnostics": _exposure_diagnostics(event_exposure),
+        "portfolio_simulation": _portfolio_simulation_from_records(
+            records,
+            PortfolioSimulationConfig(assumptions=base_assumptions),
+        ),
         "stress_diagnostics": _stress_diagnostics(
             candles_by_symbol,
             records,
@@ -435,6 +464,170 @@ def _conditioned_results(records: list[dict[str, Any]]) -> dict[str, dict[str, f
     }
 
 
+PORTFOLIO_BLOCKING_RISK_FLAGS = {
+    "stale_data",
+    "failed_data_quality",
+    "incomplete_current_candle",
+    "timestamp_drift",
+    "missing_candles",
+    "low_liquidity",
+    "wide_spread",
+    "stale_orderbook",
+    "orderbook_timestamp_drift",
+    "symbol_quarantined",
+    "insufficient_history",
+    "inactive_market",
+}
+
+
+def _portfolio_simulation_from_records(
+    records: list[dict[str, Any]],
+    config: PortfolioSimulationConfig,
+) -> dict[str, object]:
+    selected, dropped_by_constraint = _select_portfolio_records(records, config)
+    periodic_returns = _portfolio_periodic_returns(selected, config)
+    exposure = _portfolio_exposure(selected, config)
+    gross_entry_turnover = len(selected) / config.max_positions if selected else 0.0
+    rebalance_count = len({int(record["entry_index"]) for record in selected})
+    final_equity = 1.0
+    for ret in periodic_returns:
+        final_equity *= 1 + ret
+    return {
+        "research_portfolio_simulation": True,
+        "hypothetical_only": True,
+        "not_financial_advice": True,
+        "no_order_was_placed": True,
+        "notification_logic_excluded": True,
+        "closed_candle_signals_only": True,
+        "next_open_entries_only": True,
+        "equal_weight_max_positions": config.max_positions,
+        "holding_bars": config.assumptions.holding_bars,
+        "fee_bps": config.assumptions.fee_bps,
+        "spread_bps": config.assumptions.spread_bps,
+        "slippage_bps": config.assumptions.slippage_bps,
+        "signals_considered": len(records),
+        "selected_trades": len(selected),
+        "dropped_by_constraint": dropped_by_constraint,
+        "return_summary": summarize_returns(periodic_returns),
+        "trade_return_summary": summarize_returns([float(record["return"]) for record in selected]),
+        "turnover": {
+            "rebalance_count": rebalance_count,
+            "gross_entry_turnover_fraction": gross_entry_turnover,
+            "average_entry_turnover_fraction": (
+                0.0 if rebalance_count == 0 else gross_entry_turnover / rebalance_count
+            ),
+            "not_order_turnover": True,
+        },
+        "exposure": exposure,
+        "final_equity": final_equity,
+        "research_warning": (
+            "Research portfolio simulation only. Not financial advice. No order was placed."
+        ),
+    }
+
+
+def _select_portfolio_records(
+    records: list[dict[str, Any]],
+    config: PortfolioSimulationConfig,
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    dropped_by_constraint: dict[str, int] = {}
+    eligible_by_entry: dict[int, list[dict[str, Any]]] = {}
+    for record in records:
+        exclusion = _portfolio_exclusion_reason(record)
+        if exclusion is not None:
+            dropped_by_constraint[exclusion] = dropped_by_constraint.get(exclusion, 0) + 1
+            continue
+        eligible_by_entry.setdefault(int(record["entry_index"]), []).append(record)
+
+    selected: list[dict[str, Any]] = []
+    for entry_index in sorted(eligible_by_entry):
+        active_count = sum(
+            1
+            for record in selected
+            if int(record["entry_index"]) <= entry_index <= int(record["exit_index"])
+        )
+        capacity = config.max_positions - active_count
+        if capacity <= 0:
+            dropped_by_constraint["capacity_full"] = (
+                dropped_by_constraint.get("capacity_full", 0) + len(eligible_by_entry[entry_index])
+            )
+            continue
+        ranked = sorted(
+            eligible_by_entry[entry_index],
+            key=lambda record: (
+                _record_score(record) is None,
+                -(_record_score(record) or 0.0),
+                str(record["symbol"]),
+            ),
+        )
+        selected.extend(ranked[:capacity])
+        overflow = len(ranked) - capacity
+        if overflow > 0:
+            dropped_by_constraint["capacity_full"] = dropped_by_constraint.get("capacity_full", 0) + overflow
+    return selected, dropped_by_constraint
+
+
+def _portfolio_exclusion_reason(record: dict[str, Any]) -> str | None:
+    condition = record["condition"]
+    if condition.get("data_quality_status", "pass") != "pass":
+        return "data_quality_not_pass"
+    if condition.get("symbol_health_status", "healthy") == "quarantined":
+        return "symbol_quarantined"
+    if condition.get("confidence") == "low":
+        return "low_confidence"
+    risk_flags = condition.get("risk_flags", [])
+    for flag in risk_flags:
+        if flag in PORTFOLIO_BLOCKING_RISK_FLAGS:
+            return f"risk_flag:{flag}"
+    return None
+
+
+def _portfolio_periodic_returns(
+    selected: list[dict[str, Any]],
+    config: PortfolioSimulationConfig,
+) -> list[float]:
+    returns_by_exit: dict[int, float] = {}
+    for record in selected:
+        exit_index = int(record["exit_index"])
+        returns_by_exit[exit_index] = returns_by_exit.get(exit_index, 0.0) + (
+            float(record["return"]) / config.max_positions
+        )
+    return [returns_by_exit[index] for index in sorted(returns_by_exit)]
+
+
+def _portfolio_exposure(
+    selected: list[dict[str, Any]],
+    config: PortfolioSimulationConfig,
+) -> dict[str, object]:
+    if not selected:
+        return {
+            "average_exposure_fraction": 0.0,
+            "max_exposure_fraction": 0.0,
+            "average_open_positions": 0.0,
+            "max_open_positions": 0,
+            "position_cap_enforced": True,
+        }
+    min_entry = min(int(record["entry_index"]) for record in selected)
+    max_exit = max(int(record["exit_index"]) for record in selected)
+    open_counts = [
+        sum(
+            1
+            for record in selected
+            if int(record["entry_index"]) <= index <= int(record["exit_index"])
+        )
+        for index in range(min_entry, max_exit + 1)
+    ]
+    average_open = sum(open_counts) / len(open_counts)
+    max_open = max(open_counts)
+    return {
+        "average_exposure_fraction": average_open / config.max_positions,
+        "max_exposure_fraction": max_open / config.max_positions,
+        "average_open_positions": average_open,
+        "max_open_positions": max_open,
+        "position_cap_enforced": max_open <= config.max_positions,
+    }
+
+
 def _stress_diagnostics(
     candles_by_symbol: dict[str, list[Candle]],
     records: list[dict[str, Any]],
@@ -770,6 +963,7 @@ def _diagnostic_flags() -> dict[str, bool | str]:
         "not_financial_advice": True,
         "research_warning": (
             "Backtest output is hypothetical diagnostic research only. "
-            "It is not financial advice, not a portfolio simulator, and no order was placed."
+            "It is not financial advice, not a production execution or account simulator, "
+            "and no order was placed."
         ),
     }
