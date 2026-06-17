@@ -45,6 +45,12 @@ class SignalCandidate:
     entry_confirmation_reason_codes: list[str] = field(default_factory=list)
     entry_confirmation_risk_flags: list[str] = field(default_factory=list)
     entry_confirmation_details: list[dict[str, object]] = field(default_factory=list)
+    directional_view: str = "upside_watch"
+    confidence_calibration: str = "unvalidated"
+    evidence_grade: str = "C"
+    why_not_trade_signal: str = "Research screen only; not a trade instruction."
+    next_validation_needed: str = "Needs closed-candle follow-up and benchmark confirmation."
+    strategy_overlay: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -87,6 +93,12 @@ class SignalCandidate:
             "entry_confirmation_reason_codes": self.entry_confirmation_reason_codes,
             "entry_confirmation_risk_flags": self.entry_confirmation_risk_flags,
             "entry_confirmation_details": self.entry_confirmation_details,
+            "directional_view": self.directional_view,
+            "confidence_calibration": self.confidence_calibration,
+            "evidence_grade": self.evidence_grade,
+            "why_not_trade_signal": self.why_not_trade_signal,
+            "next_validation_needed": self.next_validation_needed,
+            "strategy_overlay": self.strategy_overlay,
         }
 
     def with_rank(self, rank: int) -> SignalCandidate:

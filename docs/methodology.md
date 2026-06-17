@@ -42,7 +42,7 @@ Signals are generated only from closed candles. Backtest entries must occur afte
 close, using the next candle open in the smoke engine.
 
 Diagnostic backtest summaries report event counts, hit rate, average return, average win/loss,
-gain/loss factor, profit factor, max drawdown, Sharpe, Sortino, worst return, and 5th-percentile
+gain/loss factor, max drawdown, Sharpe, Sortino, worst return, and 5th-percentile
 tail loss in `event_return_summary`. `research_diagnostic_coverage` records whether the command
 output includes the public-data-only, closed-candle, next-open, benchmark, walk-forward, stress,
 calibration, and research portfolio sections needed for audit review. These are event-study

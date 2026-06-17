@@ -33,6 +33,12 @@ def assess_candles(
     open_times = [candle.open_time_utc for candle in candles]
     if len(open_times) != len(set(open_times)):
         warnings.append("duplicate_candles")
+    ordered_candles = sorted(candles, key=lambda candle: candle.open_time_utc)
+    if any(
+        current.open_time_utc < previous.close_time_utc
+        for previous, current in zip(ordered_candles, ordered_candles[1:], strict=False)
+    ):
+        warnings.append("overlapping_candles")
 
     invalid_ohlc = [
         candle
@@ -77,6 +83,7 @@ def assess_candles(
     hard_failures = {
         "no_candles",
         "duplicate_candles",
+        "overlapping_candles",
         "invalid_ohlc",
         "incomplete_current_candle",
         "timestamp_drift",

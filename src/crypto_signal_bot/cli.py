@@ -61,6 +61,7 @@ from crypto_signal_bot.notifications.discord_webhook import DiscordWebhookNotifi
 from crypto_signal_bot.notifications.noop import NoopNotifier
 from crypto_signal_bot.notifications.telegram import TelegramNotifier
 from crypto_signal_bot.research import config_hash
+from crypto_signal_bot.signals.binance_liquid_momentum import apply_binance_liquid_momentum_v2
 from crypto_signal_bot.signals.entry_timing import (
     EntryTimeframeAlignment,
     EntryTimingConfig,
@@ -104,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     try:
-        settings = load_settings()
+        settings = load_settings(getattr(args, "profile", None))
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
@@ -180,7 +181,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     collect = sub.add_parser("collect", help="Collect public market candles.")
-    collect.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    _add_profile_argument(collect)
+    collect.add_argument("--exchange", choices=["upbit", "binance"], default=None)
     collect.add_argument("--quote", default=None)
     collect.add_argument("--interval", default="5m")
     collect.add_argument("--limit", type=int, default=200)
@@ -191,7 +193,8 @@ def _build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--mock", action="store_true", help="Use deterministic local fixture data.")
 
     rank = sub.add_parser("rank", help="Rank stored public-market candidates.")
-    rank.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    _add_profile_argument(rank)
+    rank.add_argument("--exchange", choices=["upbit", "binance"], default=None)
     rank.add_argument("--quote", default=None)
     rank.add_argument("--interval", default="5m")
     rank.add_argument("--top", type=int, default=20)
@@ -211,7 +214,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     backtest = sub.add_parser("backtest", help="Run a minimal leakage-safe event-study smoke test.")
-    backtest.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    _add_profile_argument(backtest)
+    backtest.add_argument("--exchange", choices=["upbit", "binance"], default=None)
     backtest.add_argument("--quote", default=None)
     backtest.add_argument("--interval", default="15m")
     backtest.add_argument("--from", dest="from_date", default=None)
@@ -238,7 +242,8 @@ def _build_parser() -> argparse.ArgumentParser:
     digest = notification_sub.add_parser("digest", help="Build research-only digest previews.")
     digest_sub = digest.add_subparsers(dest="digest_command", required=True)
     digest_preview = digest_sub.add_parser("preview", help="Preview a research digest without sending it.")
-    digest_preview.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    _add_profile_argument(digest_preview)
+    digest_preview.add_argument("--exchange", choices=["upbit", "binance"], default=None)
     digest_preview.add_argument("--quote", default=None)
     digest_preview.add_argument("--interval", default="5m")
     digest_preview.add_argument("--top", type=int, default=None)
@@ -306,13 +311,14 @@ def _build_parser() -> argparse.ArgumentParser:
     strategy = sub.add_parser("strategy", help="Run research-only strategy scans.")
     strategy_sub = strategy.add_subparsers(dest="strategy_command", required=True)
     strategy_scan = strategy_sub.add_parser("scan", help="Scan stored candles with entry timing research logic.")
-    strategy_scan.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    _add_profile_argument(strategy_scan)
+    strategy_scan.add_argument("--exchange", choices=["upbit", "binance"], default=None)
     strategy_scan.add_argument("--quote", default=None)
     strategy_scan.add_argument("--base-interval", dest="base_interval", default="5m")
     strategy_scan.add_argument("--timeframes", default=None, help="Comma-separated intervals, e.g. 5m,15m,30m.")
     strategy_scan.add_argument(
         "--strategy",
-        choices=["three_tick", "bottoming", "three_tick_bottoming"],
+        choices=["three_tick", "bottoming", "three_tick_bottoming", "binance_liquid_momentum_v2"],
         default="three_tick_bottoming",
     )
     strategy_scan.add_argument("--top", type=int, default=20)
@@ -323,9 +329,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "event-study",
         help="Compare research-only strategy variants with closed-candle, next-open diagnostics.",
     )
-    strategy_event_study.add_argument("--exchange", choices=["upbit", "binance"], required=True)
+    _add_profile_argument(strategy_event_study)
+    strategy_event_study.add_argument("--exchange", choices=["upbit", "binance"], default=None)
     strategy_event_study.add_argument("--quote", default=None)
     strategy_event_study.add_argument("--interval", default="5m")
+    strategy_event_study.add_argument(
+        "--strategy",
+        choices=["entry_timing_v1", "binance_liquid_momentum_v2"],
+        default="entry_timing_v1",
+    )
     strategy_event_study.add_argument("--horizons", default="1,3,6,12", help="Comma-separated forward bar horizons.")
     strategy_event_study.add_argument("--min-history-bars", type=int, default=None)
     strategy_event_study.add_argument("--fee-bps", type=float, default=10.0)
@@ -419,11 +431,34 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _add_profile_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--profile", default=None, help="Optional flat YAML/env profile file.")
+
+
+def _resolve_exchange(args: argparse.Namespace, settings: Settings) -> str:
+    exchange = getattr(args, "exchange", None) or settings.primary_exchange
+    if exchange not in {"binance", "upbit"}:
+        raise ConfigError("Exchange must be binance or upbit.")
+    if exchange == "binance" and not settings.binance_enabled:
+        raise ConfigError("Binance is disabled by the active profile.")
+    if exchange == "upbit" and not settings.upbit_enabled:
+        raise ConfigError("Upbit is disabled by the active profile.")
+    return str(exchange)
+
+
+def _resolve_quote(args: argparse.Namespace, settings: Settings, exchange: str) -> str:
+    quote = getattr(args, "quote", None)
+    if quote:
+        return str(quote)
+    return settings.default_quote or ("KRW" if exchange == "upbit" else "USDT")
+
+
 def _collect(args: argparse.Namespace, settings: Settings) -> int:
-    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    exchange = _resolve_exchange(args, settings)
+    quote = _resolve_quote(args, settings, exchange)
     store = SQLiteStore(settings.database_path)
     if args.mock:
-        mocked = make_mock_candles(args.exchange, quote, args.interval, limit=args.limit)
+        mocked = make_mock_candles(exchange, quote, args.interval, limit=args.limit)
         count = store.upsert_candles(mocked)
         symbols = sorted({candle.symbol for candle in mocked})
         ticker_count = 0 if args.skip_tickers else store.upsert_tickers(_mock_tickers(mocked))
@@ -440,7 +475,7 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
             )
             _assess_and_store_symbol_health(
                 store,
-                args.exchange,
+                exchange,
                 symbol,
                 args.interval,
                 candles,
@@ -449,12 +484,12 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
             )
         print(
             f"Stored {count} mocked public candles, {ticker_count} tickers, "
-            f"and {orderbook_count} orderbooks for {args.exchange} {quote}."
+            f"and {orderbook_count} orderbooks for {exchange} {quote}."
         )
         print("Research-only data collection completed. No order was placed.")
         return 0
 
-    client = _exchange_client(args.exchange, settings)
+    client = _exchange_client(exchange, settings)
     markets = client.get_markets(quote)
     max_symbols = args.max_symbols or settings.max_symbols_per_collect
     selected = markets[:max_symbols]
@@ -464,7 +499,7 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
         if market.status != "TRADING":
             _assess_and_store_symbol_health(
                 store,
-                args.exchange,
+                exchange,
                 market.raw_symbol,
                 args.interval,
                 [],
@@ -482,7 +517,7 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
         )
         _assess_and_store_symbol_health(
             store,
-            args.exchange,
+            exchange,
             market.raw_symbol,
             args.interval,
             candles,
@@ -492,21 +527,21 @@ def _collect(args: argparse.Namespace, settings: Settings) -> int:
         )
     ticker_count = 0
     if not args.skip_tickers and selected_trading:
-        ticker_count = store.upsert_tickers(_fetch_tickers(client, args.exchange, selected_trading))
+        ticker_count = store.upsert_tickers(_fetch_tickers(client, exchange, selected_trading))
     orderbook_count = 0
     if args.with_orderbook and selected_trading:
         max_orderbooks = args.max_orderbook_symbols or settings.max_orderbook_symbols_per_collect
         orderbook_count = store.upsert_orderbooks(
             _fetch_orderbooks(
                 client,
-                args.exchange,
+                exchange,
                 selected_trading[:max_orderbooks],
                 depth_limit=settings.orderbook_depth_limit,
             )
         )
     print(
         f"Stored {stored} public candles, {ticker_count} tickers, and {orderbook_count} orderbooks "
-        f"for {len(selected)} {args.exchange} {quote} symbols. "
+        f"for {len(selected)} {exchange} {quote} symbols. "
         "No private API was used."
     )
     return 0
@@ -717,7 +752,8 @@ def _quote_for_exit_guard_mock_symbol(exchange: str, symbol: str) -> str:
 
 
 def _rank(args: argparse.Namespace, settings: Settings) -> int:
-    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    exchange = _resolve_exchange(args, settings)
+    quote = _resolve_quote(args, settings, exchange)
     store = SQLiteStore(settings.database_path)
     entry_timeframe_alignment = None
     if args.confirmation_intervals is not None:
@@ -731,10 +767,10 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
             else [args.interval]
         )
         for mock_interval in mock_intervals:
-            store.upsert_candles(make_mock_candles(args.exchange, quote, mock_interval, limit=160))
+            store.upsert_candles(make_mock_candles(exchange, quote, mock_interval, limit=160))
     scored = _score_research_from_store(
         store,
-        args.exchange,
+        exchange,
         quote,
         args.interval,
         args.top,
@@ -749,7 +785,7 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
             result_candidates=result.candidates,
             scored_candidates=scored,
             settings=settings,
-            exchange=args.exchange,
+            exchange=exchange,
             quote=quote,
             interval=args.interval,
             mock_mode=bool(args.mock),
@@ -793,16 +829,17 @@ def _rank(args: argparse.Namespace, settings: Settings) -> int:
 def _backtest(args: argparse.Namespace, settings: Settings) -> int:
     from crypto_signal_bot.backtest.engine import diagnostic_event_study
 
-    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    exchange = _resolve_exchange(args, settings)
+    quote = _resolve_quote(args, settings, exchange)
     store = SQLiteStore(settings.database_path)
     mocked_candles = None
     if args.mock:
-        mocked_candles = make_mock_candles(args.exchange, quote, args.interval, limit=120)
+        mocked_candles = make_mock_candles(exchange, quote, args.interval, limit=120)
         store.upsert_candles(mocked_candles)
     symbols = (
         sorted({candle.symbol for candle in mocked_candles})
         if mocked_candles is not None
-        else store.list_symbols(args.exchange, quote, args.interval)
+        else store.list_symbols(exchange, quote, args.interval)
     )
     if not symbols:
         print("No stored candles found. Run collect first or use --mock.")
@@ -811,7 +848,7 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
         symbol: (
             [candle for candle in mocked_candles if candle.symbol == symbol]
             if mocked_candles is not None
-            else store.fetch_candles(args.exchange, symbol, args.interval)
+            else store.fetch_candles(exchange, symbol, args.interval)
         )
         for symbol in symbols
     }
@@ -823,16 +860,16 @@ def _backtest(args: argparse.Namespace, settings: Settings) -> int:
         symbol: list(range(50, max(50, len(candles) - 5), 20))
         for symbol, candles in candles_by_symbol.items()
     }
-    benchmark_symbol = f"{quote}-BTC" if args.exchange == "upbit" else f"BTC{quote}"
+    benchmark_symbol = f"{quote}-BTC" if exchange == "upbit" else f"BTC{quote}"
     metrics = diagnostic_event_study(
         candles_by_symbol,
         signal_indices_by_symbol,
         benchmark_symbol=benchmark_symbol,
-        benchmark_symbols=_benchmark_symbols_for_quote(args.exchange, quote),
+        benchmark_symbols=_benchmark_symbols_for_quote(exchange, quote),
         symbol_conditions={
             symbol: _backtest_symbol_condition(
                 store,
-                args.exchange,
+                exchange,
                 symbol,
                 args.interval,
                 candles,
@@ -858,26 +895,28 @@ def _strategy(args: argparse.Namespace, settings: Settings) -> int:
 
 
 def _strategy_scan(args: argparse.Namespace, settings: Settings) -> int:
-    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    exchange = _resolve_exchange(args, settings)
+    quote = _resolve_quote(args, settings, exchange)
     timeframe_alignment = _strategy_timeframe_alignment(args.base_interval, args.timeframes)
     intervals = list(timeframe_alignment.timeframes)
     store = SQLiteStore(settings.database_path)
     if args.mock:
         for interval in intervals:
-            store.upsert_candles(make_mock_candles(args.exchange, quote, interval, limit=160))
+            store.upsert_candles(make_mock_candles(exchange, quote, interval, limit=160))
 
     scored: list[ScoredResearchCandidate] = []
     for interval in intervals:
         scored.extend(
             _score_research_from_store(
                 store,
-                args.exchange,
+                exchange,
                 quote,
                 interval,
                 args.top,
                 settings,
                 include_entry_timing=True,
                 entry_strategy=args.strategy,
+                entry_timeframe_alignment=timeframe_alignment,
             )
         )
     candidates = _rank_by_research_priority([item.candidate for item in scored], top=args.top)
@@ -890,7 +929,7 @@ def _strategy_scan(args: argparse.Namespace, settings: Settings) -> int:
             result_candidates=candidates,
             scored_candidates=scored,
             settings=settings,
-            exchange=args.exchange,
+            exchange=exchange,
             quote=quote,
             interval=args.base_interval,
             mock_mode=bool(args.mock),
@@ -981,7 +1020,8 @@ def _strategy_event_study(args: argparse.Namespace, settings: Settings) -> int:
         strategy_event_study,
     )
 
-    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    exchange = _resolve_exchange(args, settings)
+    quote = _resolve_quote(args, settings, exchange)
     horizons = _parse_positive_int_csv(args.horizons, field_name="horizons")
     min_history_bars = args.min_history_bars if args.min_history_bars is not None else settings.min_history_bars
     if min_history_bars <= 0:
@@ -993,23 +1033,24 @@ def _strategy_event_study(args: argparse.Namespace, settings: Settings) -> int:
     store = SQLiteStore(settings.database_path)
     if args.mock:
         mock_limit = max(160, min_history_bars + max(horizons) + 20)
-        store.upsert_candles(make_mock_candles(args.exchange, quote, args.interval, limit=mock_limit))
+        store.upsert_candles(make_mock_candles(exchange, quote, args.interval, limit=mock_limit))
 
-    symbols = store.list_symbols(args.exchange, quote, args.interval)
+    symbols = store.list_symbols(exchange, quote, args.interval)
     if not symbols:
         print("No stored candles found. Run collect first or use --mock.")
         return 1
 
     candles_by_symbol = {
-        symbol: store.fetch_candles(args.exchange, symbol, args.interval)
+        symbol: store.fetch_candles(exchange, symbol, args.interval)
         for symbol in symbols
     }
-    benchmark_symbol = f"{quote}-BTC" if args.exchange == "upbit" else f"BTC{quote}"
+    benchmark_symbol = f"{quote}-BTC" if exchange == "upbit" else f"BTC{quote}"
     metrics = strategy_event_study(
         candles_by_symbol,
         benchmark_symbol=benchmark_symbol,
-        benchmark_symbols=_benchmark_symbols_for_quote(args.exchange, quote),
+        benchmark_symbols=_benchmark_symbols_for_quote(exchange, quote),
         config=StrategyEventStudyConfig(
+            strategy=args.strategy,
             min_history_bars=min_history_bars,
             horizons=horizons,
             fee_bps=args.fee_bps,
@@ -2125,10 +2166,11 @@ def _notifications_digest(args: argparse.Namespace, settings: Settings, store: S
     if args.top is not None and args.top <= 0:
         raise ConfigError("notifications digest preview --top must be positive.")
 
-    quote = args.quote or ("KRW" if args.exchange == "upbit" else "USDT")
+    exchange = _resolve_exchange(args, settings)
+    quote = _resolve_quote(args, settings, exchange)
     top_n = args.top or settings.alert_top_n
     if args.mock:
-        store.upsert_candles(make_mock_candles(args.exchange, quote, args.interval, limit=160))
+        store.upsert_candles(make_mock_candles(exchange, quote, args.interval, limit=160))
 
     if not settings.alert_digest_enabled and not args.force_preview:
         _print_json(
@@ -2145,7 +2187,7 @@ def _notifications_digest(args: argparse.Namespace, settings: Settings, store: S
 
     scored = _score_research_from_store(
         store,
-        args.exchange,
+        exchange,
         quote,
         args.interval,
         top_n,
@@ -2475,22 +2517,31 @@ def _score_research_from_store(
             orderbook_available=orderbook is not None,
         )
         if include_entry_timing:
-            candidate = _candidate_with_entry_timing(
-                candidate,
-                candles,
-                quality,
-                strategy=entry_strategy,
-            )
-            if entry_timeframe_alignment is not None:
-                candidate = _candidate_with_entry_timeframe_confirmation(
-                    store,
+            if entry_strategy == "binance_liquid_momentum_v2":
+                candidate = apply_binance_liquid_momentum_v2(
                     candidate,
-                    exchange=exchange,
-                    symbol=symbol,
-                    settings=settings,
-                    alignment=entry_timeframe_alignment,
+                    snapshot,
+                    timeframe_alignment=(
+                        None if entry_timeframe_alignment is None else entry_timeframe_alignment.to_dict()
+                    ),
+                )
+            else:
+                candidate = _candidate_with_entry_timing(
+                    candidate,
+                    candles,
+                    quality,
                     strategy=entry_strategy,
                 )
+                if entry_timeframe_alignment is not None:
+                    candidate = _candidate_with_entry_timeframe_confirmation(
+                        store,
+                        candidate,
+                        exchange=exchange,
+                        symbol=symbol,
+                        settings=settings,
+                        alignment=entry_timeframe_alignment,
+                        strategy=entry_strategy,
+                    )
         scored_candidates.append(
             ScoredResearchCandidate(
                 candidate=candidate,
@@ -3190,12 +3241,18 @@ def _exchange_client(exchange: str, settings: Settings) -> PublicMarketDataClien
 def _print_table(candidates: list[SignalCandidate], *, display_timezone: str | None = None) -> None:
     print("Research watchlist only. Not financial advice. No order was placed.")
     include_entry = any(candidate.entry_timing_status != "not_evaluated" for candidate in candidates)
+    include_strategy_research = any(
+        candidate.entry_strategy == "binance_liquid_momentum_v2"
+        for candidate in candidates
+    )
     include_display_time = display_timezone is not None
     if Console is not None and Table is not None:
         table = Table(title="Crypto Signal Research Watchlist")
         columns = ["Rank", "Exchange", "Symbol", "Score", "Confidence", "Price"]
         if include_display_time:
             columns.append("Data Time")
+        if include_strategy_research:
+            columns.extend(["View", "Evidence", "Calibration"])
         if include_entry:
             columns.extend(["Entry", "Priority"])
         columns.extend(["Drivers", "Risks"])
@@ -3217,6 +3274,14 @@ def _print_table(candidates: list[SignalCandidate], *, display_timezone: str | N
                         display_timezone,
                         compact=True,
                     )
+                )
+            if include_strategy_research:
+                row.extend(
+                    [
+                        candidate.directional_view,
+                        candidate.evidence_grade,
+                        candidate.confidence_calibration,
+                    ]
                 )
             if include_entry:
                 row.extend(
@@ -3240,6 +3305,13 @@ def _print_table(candidates: list[SignalCandidate], *, display_timezone: str | N
         return
     for candidate in candidates:
         entry_part = ""
+        strategy_part = ""
+        if include_strategy_research:
+            strategy_part = (
+                f" view={candidate.directional_view}"
+                f" evidence={candidate.evidence_grade}"
+                f" calibration={candidate.confidence_calibration}"
+            )
         if include_entry:
             priority = (
                 ""
@@ -3252,6 +3324,7 @@ def _print_table(candidates: list[SignalCandidate], *, display_timezone: str | N
             f"score={candidate.score:5.1f} confidence={candidate.confidence:<6} "
             f"price={candidate.current_price:.8g}"
             f"{_table_display_time(candidate, display_timezone)}"
+            f"{strategy_part}"
             f"{entry_part} drivers={','.join(candidate.drivers[:3])} "
             f"risks={','.join(candidate.risk_flags[:3]) or 'none'}"
         )

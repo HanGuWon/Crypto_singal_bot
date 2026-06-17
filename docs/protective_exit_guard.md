@@ -3,6 +3,8 @@
 This document describes a future, separate protective exit guard. The current MVP does not place
 orders, does not call private exchange endpoints, and does not enable live execution.
 
+Dry-run only. No order placed. No private API. Not financial advice.
+
 ## Purpose
 
 The public screener answers which assets deserve research attention. The entry timing layer answers
