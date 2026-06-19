@@ -174,6 +174,34 @@ def test_strategy_event_study_reports_stress_diagnostics() -> None:
     assert outage_trades >= 1
 
 
+def test_binance_liquid_momentum_v2_event_study_is_research_only_and_next_open() -> None:
+    result = strategy_event_study(
+        _liquid_momentum_universe(),
+        benchmark_symbol="BTCUSDT",
+        config=StrategyEventStudyConfig(
+            strategy="binance_liquid_momentum_v2",
+            horizons=(1, 3),
+            min_history_bars=60,
+        ),
+    )
+
+    assert result["strategy"] == "binance_liquid_momentum_v2"
+    assert result["public_data_only"] is True
+    assert result["private_api_used"] is False
+    assert result["no_order_placed"] is True
+    assert result["notification_logic_excluded"] is True
+    assert result["no_same_candle_execution"] is True
+    assert result["signal_counts"]["binance_liquid_momentum_v2"] >= 1
+    sample = result["sample_signals"]["binance_liquid_momentum_v2"][0]
+    assert sample["entry_index"] == sample["signal_index"] + 1
+    assert sample["entry_time_utc"] > sample["signal_time_utc"]
+    assert sample["directional_view"] in {"upside_watch", "downside_risk_watch"}
+    assert sample["evidence_grade"] in {"A", "B", "C"}
+    assert sample["why_not_trade_signal"] == "Research screen only; not a trade instruction."
+    assert result["score_bucket_calibration"]
+    assert "1" in result["benchmark_adjusted_return"]
+
+
 def test_strategy_output_avoids_forbidden_recommendation_language() -> None:
     text = json.dumps(
         strategy_event_study(
@@ -188,12 +216,56 @@ def test_strategy_output_avoids_forbidden_recommendation_language() -> None:
         assert forbidden not in text
 
 
+def test_binance_liquid_momentum_v2_output_avoids_recommendation_language() -> None:
+    text = json.dumps(
+        strategy_event_study(
+            _liquid_momentum_universe(),
+            benchmark_symbol="BTCUSDT",
+            config=StrategyEventStudyConfig(
+                strategy="binance_liquid_momentum_v2",
+                horizons=(1,),
+                min_history_bars=60,
+            ),
+        )
+    ).lower()
+
+    for forbidden in ["buy now", "sure profit", "guaranteed", "urgent buy", "profit factor"]:
+        assert forbidden not in text
+
+
 def _strategy_universe() -> dict[str, list[Candle]]:
     return {
         "BTCUSDT": _strategy_candles("BTCUSDT", base_price=100.0),
         "ETHUSDT": _strategy_candles("ETHUSDT", base_price=80.0),
         "ALPHAUSDT": _strategy_candles("ALPHAUSDT", base_price=50.0),
     }
+
+
+def _liquid_momentum_universe() -> dict[str, list[Candle]]:
+    return {
+        "BTCUSDT": _momentum_candles("BTCUSDT", drift=0.00025),
+        "ETHUSDT": _momentum_candles("ETHUSDT", drift=0.00055),
+        "ALPHAUSDT": _momentum_candles("ALPHAUSDT", drift=0.0011),
+    }
+
+
+def _momentum_candles(symbol: str, *, drift: float) -> list[Candle]:
+    candles: list[Candle] = []
+    base_price = 100.0
+    for index in range(120):
+        close = base_price * (1 + drift * index)
+        open_price = close * 0.999
+        candles.append(
+            _candle(
+                index,
+                symbol=symbol,
+                open_price=open_price,
+                high=close * 1.004,
+                low=open_price * 0.996,
+                close=close,
+            )
+        )
+    return [_replace_candle(candle, quote_volume=6_000_000.0, base_volume=60_000.0) for candle in candles]
 
 
 def _strategy_candles(symbol: str, *, base_price: float = 100.0) -> list[Candle]:

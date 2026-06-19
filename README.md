@@ -1,6 +1,7 @@
 # Crypto Signal Bot
 
-Research-only crypto market signal screener for public Upbit and Binance market data.
+Research-only crypto market signal screener for public Binance spot market data, with an
+importable Upbit public-data client kept for non-default research extensions.
 
 This project is not a live trading bot, does not place orders, does not use private exchange
 endpoints, and is not financial advice. It outputs a ranked research watchlist with transparent
@@ -8,9 +9,10 @@ component scores, drivers, risk flags, confidence, timestamps, and data-quality 
 
 ## Supported Public Data
 
-- Upbit KRW public quotation endpoints: market list, minute candles, ticker, orderbook.
 - Binance spot public market-data endpoints on `data-api.binance.vision`: exchange info, klines,
   24h ticker, depth/orderbook.
+- Upbit KRW public quotation endpoints are present as an optional client, but the documented
+  default profile and smoke tests use Binance spot public data only.
 - UTC is used internally. CLI JSON/table output also includes display timestamps using
   `DISPLAY_TIMEZONE` (default `Asia/Seoul`) for KST-facing review workflows.
 
@@ -37,23 +39,23 @@ The MVP does not require exchange API keys.
 Use mocked fixture data without live internet:
 
 ```bash
-python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interval 5m --limit 120 --mock
-python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format table
-python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json
-python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --save-run
-python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --include-entry-timing
-python -m crypto_signal_bot.cli rank --exchange binance --quote USDT --interval 5m --top 10 --format json --include-entry-timing --confirmation-intervals 15m,30m --mock
-python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m,30m --strategy three_tick --top 20 --format json --mock
-python -m crypto_signal_bot.cli strategy scan --exchange binance --quote USDT --base-interval 5m --timeframes 5m,15m --strategy three_tick_bottoming --top 20 --format json --mock --save-run
-python -m crypto_signal_bot.cli strategy event-study --exchange binance --quote USDT --interval 5m --horizons 1,3,6,12 --format json --mock
+python -m crypto_signal_bot.cli collect --profile configs/binance_spot_research.yaml --interval 5m --limit 120 --mock
+python -m crypto_signal_bot.cli rank --profile configs/binance_spot_research.yaml --interval 5m --top 10 --format table --mock
+python -m crypto_signal_bot.cli rank --profile configs/binance_spot_research.yaml --interval 5m --top 10 --format json --mock
+python -m crypto_signal_bot.cli rank --profile configs/binance_spot_research.yaml --interval 5m --top 10 --format json --save-run --mock
+python -m crypto_signal_bot.cli rank --profile configs/binance_spot_research.yaml --interval 5m --top 10 --format json --include-entry-timing --mock
+python -m crypto_signal_bot.cli rank --profile configs/binance_spot_research.yaml --interval 5m --top 10 --format json --include-entry-timing --confirmation-intervals 15m,30m --mock
+python -m crypto_signal_bot.cli strategy scan --profile configs/binance_spot_research.yaml --base-interval 5m --timeframes 5m,15m,30m --strategy three_tick --top 20 --format json --mock
+python -m crypto_signal_bot.cli strategy scan --profile configs/binance_spot_research.yaml --base-interval 5m --timeframes 5m,15m --strategy three_tick_bottoming --top 20 --format json --mock --save-run
+python -m crypto_signal_bot.cli strategy scan --profile configs/binance_spot_research.yaml --base-interval 5m --timeframes 5m,15m,30m --strategy binance_liquid_momentum_v2 --top 20 --format json --mock
+python -m crypto_signal_bot.cli strategy event-study --profile configs/binance_spot_research.yaml --interval 5m --strategy binance_liquid_momentum_v2 --horizons 1,3,6,12 --format json --mock
 ```
 
-Use public live collection with conservative caps:
+Use Binance public live collection with conservative caps:
 
 ```bash
-python -m crypto_signal_bot.cli collect --exchange upbit --quote KRW --interval 5m --limit 200 --max-symbols 20
-python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interval 5m --limit 200 --max-symbols 20
-python -m crypto_signal_bot.cli collect --exchange binance --quote USDT --interval 5m --limit 200 --max-symbols 20 --with-orderbook --max-orderbook-symbols 10
+python -m crypto_signal_bot.cli collect --profile configs/binance_spot_research.yaml --interval 5m --limit 200 --max-symbols 20
+python -m crypto_signal_bot.cli collect --profile configs/binance_spot_research.yaml --interval 5m --limit 200 --max-symbols 20 --with-orderbook --max-orderbook-symbols 10
 ```
 
 Collection stores closed public candles and 24h ticker snapshots by default. Shallow orderbook
@@ -77,7 +79,7 @@ Backtest output is marked with `diagnostic_event_study_only=true`,
 `not_portfolio_simulator=true`, `no_execution_model=true`, and `hypothetical_diagnostic_only=true`.
 The MVP backtest path is a leakage-safety diagnostic with next-candle entries, benchmark/universe
 context, cost sensitivity, data-quality-conditioned summaries, and return-distribution metrics such
-as hit rate, average win/loss, gain/loss factor, profit factor, Sharpe, Sortino, max drawdown, and
+as hit rate, average win/loss, gain/loss factor, Sharpe, Sortino, max drawdown, and
 tail loss in `event_return_summary`. It also exposes `research_diagnostic_coverage` so audits can
 verify the presence of public-data-only, closed-candle, next-open, benchmark, walk-forward, stress,
 calibration, and research portfolio sections from the command output. It also exposes diagnostic
@@ -98,11 +100,13 @@ API-outage-flagged, and score-bucket windows when the required diagnostic inputs
 `--from` and `--to` are applied as UTC candle-open bounds; date-only `--to` includes that full UTC
 calendar day.
 
-The entry timing strategy event-study utilities are diagnostic-only and keep the same closed-candle
+The entry timing and `binance_liquid_momentum_v2` strategy event-study utilities are diagnostic-only and keep the same closed-candle
 signal / next-candle-open entry rule. They compare strategy variants, forward horizons, benchmark
 windows, fee/spread/slippage cost sensitivity, and falling-knife exclusion effects without using
-notification logic. The CLI entry point is `strategy event-study`; use `--fee-bps`, `--spread-bps`,
-and `--slippage-bps` to adjust the diagnostic cost model.
+notification logic. The v2 overlay additionally reports `directional_view`,
+`confidence_calibration`, `evidence_grade`, `why_not_trade_signal`, and `next_validation_needed`.
+The CLI entry point is `strategy event-study`; use `--fee-bps`, `--spread-bps`, and
+`--slippage-bps` to adjust the diagnostic cost model.
 
 Notification formatting test:
 
@@ -113,43 +117,8 @@ python -m crypto_signal_bot.cli alert-test --channel noop
 When notifications and a specific channel are explicitly enabled, `alert-test` sends the sample
 research alert through the same audited outbox and delivery-log path used by ranking alerts.
 
-Protective exit guard dry-run preflight:
-
-```bash
-python -m crypto_signal_bot.cli exit-guard signal --exchange binance_usdm_futures --symbol BTCUSDT --interval 5m --exposure-side long --mock-candles --save-event
-python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_long --side SELL --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook
-python -m crypto_signal_bot.cli exit-guard preflight --exchange upbit_spot --symbol KRW-BTC --action sell_only --side ask --quantity 0.01 --mock-orderbook --save-event --notify
-python -m crypto_signal_bot.cli exit-guard preflight --exchange binance_usdm_futures --symbol BTCUSDT --action close_short --side BUY --quantity 0.003 --position-mode one_way --position-side BOTH --reduce-only --mock-orderbook --request-approval
-python -m crypto_signal_bot.cli exit-guard signals list --limit 10
-python -m crypto_signal_bot.cli exit-guard signals show SIGNAL_ID
-python -m crypto_signal_bot.cli exit-guard events list --limit 10
-python -m crypto_signal_bot.cli exit-guard events show ALERT_EVENT_ID
-python -m crypto_signal_bot.cli exit-guard approvals list --status pending
-python -m crypto_signal_bot.cli exit-guard approvals approve REQUEST_ID --confirm --note "reviewed"
-```
-
-The preflight command builds a research JSON event from public orderbook data only. The `--notify`
-flag still does nothing unless global notifications, Discord webhook notifications, and
-`EXIT_GUARD_DISCORD_ALERTS_ENABLED=true` are explicitly configured. Default preflight thresholds
-are `EXIT_GUARD_MAX_ORDERBOOK_AGE_SECONDS=30` and `EXIT_GUARD_MAX_SLIPPAGE_PCT=1.0`; both can be
-overridden per dry-run command. `EXIT_GUARD_REQUIRE_SYMBOL_WHITELIST=true` is also the default; set
-`EXIT_GUARD_SYMBOL_ALLOWLIST` to comma-separated symbols such as `BTCUSDT,upbit_spot:KRW-BTC`
-before expecting a dry-run preflight to become approval-eligible. `--save-event` persists the
-dry-run `AlertEvent` to the local audit table without sending a notification or placing an order.
-When `--notify` is used, the generated `AlertEvent` is also persisted for auditability and each
-delivery attempt, failure, or disabled skip is recorded in `notification_deliveries`. `exit-guard
-events show ALERT_EVENT_ID` includes the saved event and its notification delivery audit rows.
-`--request-approval` creates a bounded manual approval audit record with a binding hash for the
-source event, exchange, symbol, side, quantity, and position scope only when the public preflight
-passes. Approval decisions re-check that binding before recording the decision. They are records
-only; they do not unlock live execution. When `--notify` and `--request-approval` are used together,
-the Discord-safe alert drivers include the manual approval request id for audit lookup.
-
-The `exit-guard signal` command builds a public-candle trend-break research signal before any
-orderbook preflight. It reads stored candles or deterministic mock candles, ignores open candles,
-can include optional confirmation intervals, and can save the resulting `AlertEvent` for audit. It
-also stores a dedicated protective-exit signal snapshot when saving or notifying. It does not read
-balances or positions and does not create approval requests.
+Protective exit guard artifacts are experimental dry-run audit records only and are outside the
+Binance spot public-data MVP. They do not place orders, read balances, or unlock live execution.
 
 Database maintenance:
 
@@ -225,6 +194,20 @@ entry timing snapshots for audit/export.
 
 See `docs/strategy_three_tick_bottoming.md` for details.
 
+## Binance Liquid Momentum V2 Research Overlay
+
+`strategy scan --strategy binance_liquid_momentum_v2` adds a Binance USDT spot-only overlay for
+liquid momentum research. It reports `directional_view`, `confidence_calibration`,
+`evidence_grade`, `why_not_trade_signal`, `next_validation_needed`, capped component
+contributions, benchmark context, liquidity regime, and manipulation-risk suppression metadata.
+It is not a recommendation engine and does not create buy/sell instructions.
+
+Run the disabled-by-default diagnostic event study with:
+
+```bash
+python -m crypto_signal_bot.cli strategy event-study --profile configs/binance_spot_research.yaml --interval 5m --strategy binance_liquid_momentum_v2 --mock
+```
+
 ## Protective Exit Guard Foundation
 
 The repository also contains a disabled-by-default protective exit guard design foundation. It adds
@@ -243,9 +226,10 @@ gaps.
 
 ## GCP Free-Tier Profile
 
-`configs/gcp_free_tier.yaml` and `docs/deploy_gcp_free_tier.md` provide a conservative VM-oriented
-deployment profile for small REST-only research runs. The profile disables WebSockets, dashboards,
-large backtests, notifications, and exit guard execution by default.
+`configs/gcp_free_tier.yaml`, `configs/gcp_free_tier_binance.yaml`, and
+`docs/deploy_gcp_free_tier.md` provide conservative VM-oriented deployment profiles for small
+REST-only research runs. The Binance free-tier profile disables Upbit scheduled jobs, WebSockets,
+dashboards, large backtests, notifications, and exit guard execution by default.
 
 ## Output Format
 
@@ -265,6 +249,8 @@ Each candidate includes:
 - closed-candle and data-quality status
 - symbol health status, quarantine reason, history bars available, and benchmark availability
 - optional entry timing status, score, research priority, reasons, and risk flags
+- optional v2 research fields: directional view, confidence calibration, evidence grade,
+  why-not-trade note, next validation needed, and strategy overlay metadata
 
 All human-readable outputs include:
 
@@ -327,8 +313,8 @@ python -m mypy src
 
 External API tests are not required by default. Use mocked CLI paths and unit tests for normal
 development. Tests marked `integration` are excluded by default. Run
-`python -m pytest -m integration tests/test_public_api_integration.py` only when intentionally
-checking real public Upbit/Binance API behavior.
+`RUN_PUBLIC_BINANCE_INTEGRATION=true python -m pytest -m integration tests/integration/test_binance_public_smoke.py`
+only when intentionally checking real low-weight Binance public API behavior.
 
 ## Known Limitations
 

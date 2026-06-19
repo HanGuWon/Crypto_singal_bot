@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from statistics import median
 from typing import Any
 from uuid import uuid4
@@ -8,11 +9,15 @@ from uuid import uuid4
 from crypto_signal_bot.backtest.leakage_checks import assert_next_candle_entry
 from crypto_signal_bot.backtest.metrics import summarize_returns
 from crypto_signal_bot.data.models import Candle, DataQualityReport
+from crypto_signal_bot.data.quality import assess_candles
 from crypto_signal_bot.features.bottoming import compute_bottoming_state
+from crypto_signal_bot.features.feature_builder import build_feature_snapshot
 from crypto_signal_bot.features.indicators import interval_to_minutes, stochastic_cross_up, stochastic_kd
 from crypto_signal_bot.features.three_tick import compute_three_tick_state
+from crypto_signal_bot.signals.binance_liquid_momentum import StrategyCandidate, build_strategy_candidate
 from crypto_signal_bot.signals.entry_timing import EntryTimingConfig, EntryTimingScorer
 from crypto_signal_bot.signals.schemas import SignalCandidate
+from crypto_signal_bot.signals.scoring import ScoringEngine
 
 STRATEGY_VARIANTS = (
     "raw_three_tick_watch",
@@ -25,6 +30,7 @@ STRATEGY_VARIANTS = (
 
 @dataclass(frozen=True)
 class StrategyEventStudyConfig:
+    strategy: str = "entry_timing_v1"
     min_history_bars: int = 30
     horizons: tuple[int, ...] = (1, 3, 6, 12)
     fee_bps: float = 10.0
@@ -49,6 +55,12 @@ def strategy_event_study(
     config: StrategyEventStudyConfig | None = None,
 ) -> dict[str, object]:
     cfg = config or StrategyEventStudyConfig()
+    if cfg.strategy == "binance_liquid_momentum_v2":
+        return _liquid_momentum_event_study(
+            candles_by_symbol,
+            benchmark_symbol=benchmark_symbol,
+            config=cfg,
+        )
     signal_records = _strategy_signal_records(candles_by_symbol, cfg)
     summaries = {
         variant: _variant_horizon_summaries(candles_by_symbol, signal_records[variant], cfg)
@@ -110,6 +122,282 @@ def generate_strategy_signal_indices(
     return [
         int(record["signal_index"])
         for record in _symbol_signal_records(candles, cfg).get(variant, [])
+    ]
+
+
+def _liquid_momentum_event_study(
+    candles_by_symbol: dict[str, list[Candle]],
+    *,
+    benchmark_symbol: str | None,
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    records, skipped = _liquid_momentum_signal_records(
+        candles_by_symbol,
+        benchmark_symbol=benchmark_symbol,
+        config=config,
+    )
+    variant = "binance_liquid_momentum_v2"
+    signal_records = {variant: records}
+    turnover_exposure = _strategy_turnover_exposure_diagnostics(signal_records, config)
+    return {
+        **_strategy_diagnostic_flags(),
+        "strategy": variant,
+        "variants": [variant],
+        "horizons": list(config.horizons),
+        "public_data_only": True,
+        "binance_spot_usdt_only": True,
+        "research_only_strategy_overlay": True,
+        "private_api_used": False,
+        "no_order_placed": True,
+        "no_same_candle_execution": True,
+        "deterministic_component_cap": True,
+        "component_cap": 20.0,
+        "no_alpha_hardcoding": True,
+        "why_not_trade_signal": "Research screen only; not a trade instruction.",
+        "next_validation_needed": "Needs closed-candle follow-up and benchmark confirmation.",
+        "cost_model": _cost_model(config),
+        "signal_counts": {variant: len(records)},
+        "variant_summaries": {
+            variant: _variant_horizon_summaries(candles_by_symbol, records, config),
+        },
+        "score_bucket_calibration": _liquid_momentum_score_bucket_calibration(
+            candles_by_symbol,
+            records,
+            config,
+        ),
+        "benchmark_adjusted_return": _liquid_momentum_benchmark_adjusted_returns(
+            candles_by_symbol,
+            records,
+            benchmark_symbol=benchmark_symbol,
+            config=config,
+        ),
+        "turnover_diagnostics": turnover_exposure["turnover_diagnostics"],
+        "exposure_diagnostics": turnover_exposure["exposure_diagnostics"],
+        "manipulation_risk_suppression": _liquid_momentum_manipulation_suppression(skipped),
+        "universe_diagnostics": _liquid_momentum_universe_diagnostics(candles_by_symbol, records, skipped, config),
+        "skipped_symbols": _liquid_momentum_skipped_symbols(skipped),
+        "sample_signals": {variant: records[:5]},
+    }
+
+
+def _liquid_momentum_signal_records(
+    candles_by_symbol: dict[str, list[Candle]],
+    *,
+    benchmark_symbol: str | None,
+    config: StrategyEventStudyConfig,
+) -> tuple[list[dict[str, Any]], dict[str, set[str]]]:
+    records: list[dict[str, Any]] = []
+    skipped: dict[str, set[str]] = {}
+    max_horizon = max(config.horizons)
+    benchmark_candles = candles_by_symbol.get(benchmark_symbol or "")
+    engine = ScoringEngine(min_quote_volume=0.0)
+    for symbol, candles in sorted(candles_by_symbol.items()):
+        if benchmark_symbol is not None and symbol == benchmark_symbol:
+            skipped.setdefault(symbol, set()).add("benchmark_symbol_excluded")
+            continue
+        if not symbol.endswith("USDT"):
+            skipped.setdefault(symbol, set()).add("not_binance_usdt_spot_symbol")
+            continue
+        if len(candles) <= config.min_history_bars + max_horizon + 1:
+            skipped.setdefault(symbol, set()).add("insufficient_history")
+            continue
+        last_signal_index = -10_000
+        for index in range(config.min_history_bars, len(candles) - max_horizon - 1):
+            if not candles[index].is_closed:
+                continue
+            if index - last_signal_index <= config.signal_cooldown_bars:
+                continue
+            past = candles[: index + 1]
+            benchmark_past = (
+                benchmark_candles[: index + 1]
+                if benchmark_candles is not None and len(benchmark_candles) > index
+                else None
+            )
+            quality = assess_candles(
+                past,
+                candles[index].interval,
+                now=candles[index].close_time_utc + timedelta(milliseconds=1),
+                max_staleness_seconds=interval_to_minutes(candles[index].interval) * 60 * 3,
+            )
+            if quality.status != "pass":
+                skipped.setdefault(symbol, set()).add(f"data_quality_{quality.status}")
+                continue
+            benchmark_available = benchmark_past is not None and len(benchmark_past) >= config.min_history_bars
+            snapshot = build_feature_snapshot(
+                past,
+                quality=quality,
+                benchmark_candles=benchmark_past,
+                now_utc=candles[index].close_time_utc + timedelta(milliseconds=1),
+            )
+            candidate = engine.score(snapshot, source_run_id="strategy-event-study:binance_liquid_momentum_v2")
+            candidate = SignalCandidate(
+                **{
+                    **candidate.to_dict(),
+                    "history_bars_available": len(past),
+                    "benchmark_available": benchmark_available,
+                    "symbol_health_status": "healthy" if benchmark_available else "quarantined",
+                    "quarantine_reason": None if benchmark_available else "benchmark_unavailable",
+                }
+            )
+            overlay = build_strategy_candidate(
+                candidate,
+                snapshot,
+                timeframe_alignment={"strategy": "event_study_single_timeframe", "aligned": True},
+                now_utc=candles[index].close_time_utc,
+            )
+            skip_reasons = _liquid_momentum_overlay_skip_reasons(overlay)
+            if skip_reasons:
+                skipped.setdefault(symbol, set()).update(skip_reasons)
+                continue
+            records.append(_liquid_momentum_record_for_signal(candles, index, overlay))
+            last_signal_index = index
+    return records, skipped
+
+
+def _liquid_momentum_record_for_signal(
+    candles: list[Candle],
+    index: int,
+    overlay: StrategyCandidate,
+) -> dict[str, Any]:
+    entry_index = index + 1
+    assert_next_candle_entry(candles[index], candles[entry_index])
+    return {
+        "symbol": candles[index].symbol,
+        "signal_index": index,
+        "entry_index": entry_index,
+        "signal_time_utc": candles[index].close_time_utc.isoformat(),
+        "entry_time_utc": candles[entry_index].open_time_utc.isoformat(),
+        "entry_price": candles[entry_index].open,
+        "strategy_score": overlay.strategy_score,
+        "research_priority_score": overlay.research_priority_score,
+        "score_bucket": _liquid_momentum_score_bucket(overlay.strategy_score),
+        "directional_view": overlay.directional_view,
+        "evidence_grade": overlay.evidence_grade,
+        "confidence_calibration": overlay.confidence_calibration,
+        "why_not_trade_signal": overlay.why_not_trade_signal,
+        "next_validation_needed": overlay.next_validation_needed,
+        "reason_codes": [] if overlay.hypothesis is None else overlay.hypothesis.reason_codes,
+        "risk_flags": _liquid_momentum_overlay_skip_reasons(overlay),
+        "manipulation_risk": overlay.manipulation_risk,
+        "component_contributions": overlay.component_contributions,
+    }
+
+
+def _liquid_momentum_overlay_skip_reasons(overlay: StrategyCandidate) -> list[str]:
+    reasons = list(overlay.skipped_reasons)
+    if overlay.manipulation_risk["risk_level"] == "high":
+        reasons.append("high_manipulation_risk")
+    if overlay.evidence_grade == "D":
+        reasons.append("low_evidence_grade")
+    if overlay.directional_view not in {"upside_watch", "downside_risk_watch"}:
+        reasons.append("neutral_holdout")
+    return _unique_strings(reasons)
+
+
+def _liquid_momentum_score_bucket(score: float) -> str:
+    if score >= 80:
+        return "80_100"
+    if score >= 70:
+        return "70_79"
+    if score >= 60:
+        return "60_69"
+    return "below_60"
+
+
+def _liquid_momentum_score_bucket_calibration(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    buckets = ("80_100", "70_79", "60_69", "below_60")
+    return {
+        bucket: {
+            "sample_count": len(bucket_records),
+            "horizon_summaries": _variant_horizon_summaries(candles_by_symbol, bucket_records, config),
+        }
+        for bucket in buckets
+        if (bucket_records := [record for record in records if record["score_bucket"] == bucket])
+        or bucket == "below_60"
+    }
+
+
+def _liquid_momentum_benchmark_adjusted_returns(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    *,
+    benchmark_symbol: str | None,
+    config: StrategyEventStudyConfig,
+) -> dict[str, dict[str, float]]:
+    if benchmark_symbol is None or benchmark_symbol not in candles_by_symbol:
+        return {str(horizon): summarize_returns([]) for horizon in config.horizons}
+    benchmark_candles = candles_by_symbol[benchmark_symbol]
+    return {
+        str(horizon): summarize_returns([
+            candidate_return - benchmark_return
+            for record in records
+            if (
+                candidate_return := _forward_return(
+                    candles_by_symbol,
+                    record,
+                    horizon,
+                    config.round_trip_cost,
+                )
+            )
+            is not None
+            and (
+                benchmark_return := _symbol_forward_return(
+                    benchmark_candles,
+                    int(record["signal_index"]),
+                    horizon,
+                    0.0,
+                )
+            )
+            is not None
+        ])
+        for horizon in config.horizons
+    }
+
+
+def _liquid_momentum_manipulation_suppression(skipped: dict[str, set[str]]) -> dict[str, object]:
+    high_risk_symbols = [
+        symbol for symbol, reasons in sorted(skipped.items()) if "high_manipulation_risk" in reasons
+    ]
+    return {
+        "high_risk_symbols": high_risk_symbols,
+        "high_risk_symbol_count": len(high_risk_symbols),
+        "suppresses_upside_alerts": True,
+        "caps_upside_strategy_score": True,
+    }
+
+
+def _liquid_momentum_universe_diagnostics(
+    candles_by_symbol: dict[str, list[Candle]],
+    records: list[dict[str, Any]],
+    skipped: dict[str, set[str]],
+    config: StrategyEventStudyConfig,
+) -> dict[str, object]:
+    symbols_with_records = sorted({str(record["symbol"]) for record in records})
+    return {
+        "input_symbols": sorted(candles_by_symbol),
+        "symbols_with_sufficient_history": [
+            symbol
+            for symbol, candles in sorted(candles_by_symbol.items())
+            if len(candles) > config.min_history_bars + max(config.horizons) + 1
+        ],
+        "symbols_with_strategy_events": symbols_with_records,
+        "symbols_without_strategy_events": [
+            symbol for symbol in sorted(candles_by_symbol) if symbol not in symbols_with_records
+        ],
+        "skipped_symbol_count": len(skipped),
+        "public_data_only": True,
+        "not_complete_delisting_database": True,
+    }
+
+
+def _liquid_momentum_skipped_symbols(skipped: dict[str, set[str]]) -> list[dict[str, object]]:
+    return [
+        {"symbol": symbol, "reasons": sorted(reasons)}
+        for symbol, reasons in sorted(skipped.items())
     ]
 
 

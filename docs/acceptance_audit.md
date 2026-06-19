@@ -1,8 +1,9 @@
 # Acceptance Audit
 
 This audit maps the current repository to the pasted research and architecture notes. It is a
-progress artifact, not a completion certificate. The project remains a research-only public-market
-data screener unless a future safety review explicitly approves a separate private-account module.
+progress artifact, not a completion certificate. The current acceptance target is a Binance spot
+public-data MVP. The project remains a research-only public-market data screener unless a future
+safety review explicitly approves a separate private-account module.
 
 Status labels:
 
@@ -35,7 +36,7 @@ successful run when this audit was introduced was:
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| Research-only public screener, not financial advice | Proved | `README.md`, `docs/safety.md`, alert formatters, CLI output warnings |
+| Binance spot public-data research screener, not financial advice | Proved | `README.md`, `docs/safety.md`, alert formatters, CLI output warnings |
 | No live trading path in the MVP | Proved | `docs/safety.md`, `src/crypto_signal_bot/exchanges/safety.py`, safety grep, tests |
 | Default config disables trading, private APIs, notifications | Proved | `src/crypto_signal_bot/config.py`, `.env.example`, `tests/test_config.py` |
 | Unknown exchange endpoints reject by default | Proved | `src/crypto_signal_bot/exchanges/safety.py`, `tests/test_exchange_safety.py` |
@@ -49,7 +50,7 @@ successful run when this audit was introduced was:
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| Upbit KRW market universe | Proved | `src/crypto_signal_bot/exchanges/upbit.py`, mocked CLI tests |
+| Upbit KRW market universe | Implemented with MVP limitations | `src/crypto_signal_bot/exchanges/upbit.py`; kept importable but not the documented default profile |
 | Binance USDT spot universe | Proved | `src/crypto_signal_bot/exchanges/binance.py`, mocked CLI tests |
 | Recent public candles | Proved | Exchange clients and collector path |
 | Ticker / 24h summary snapshots | Proved | `src/crypto_signal_bot/data/store.py`, `src/crypto_signal_bot/data/collector.py` |
@@ -72,6 +73,7 @@ successful run when this audit was introduced was:
 | Stochastic alone must not create a candidate | Proved | `signals/entry_timing.py`, `tests/test_entry_timing.py` |
 | Falling-knife suppression | Proved | `features/three_tick.py`, `features/bottoming.py`, tests |
 | Multi-timeframe confirmation | Proved | `rank --include-entry-timing --confirmation-intervals`, `strategy scan`, alignment validation, CLI tests |
+| Binance liquid momentum v2 overlay | Proved | `signals/binance_liquid_momentum.py`, `strategy scan`, strategy event-study, final safety regression tests |
 
 ## Alerts And Notifications
 
@@ -103,7 +105,7 @@ successful run when this audit was introduced was:
 
 | Requirement | Status | Evidence |
 | --- | --- | --- |
-| GCP free-tier conservative profile | Proved | `configs/gcp_free_tier.yaml`, `docs/deploy_gcp_free_tier.md` |
+| GCP free-tier conservative profile | Proved | `configs/gcp_free_tier.yaml`, `configs/gcp_free_tier_binance.yaml`, `docs/deploy_gcp_free_tier.md` |
 | Systemd/logrotate/backup examples | Proved | `scripts/systemd`, `scripts/logrotate`, `scripts/sqlite_backup.sh` |
 | Notifications disabled in deployment profile | Proved | GCP profile and systemd outbox guard |
 | Pricing/current cloud constraints | Proved | Time-boxed official-doc audit in `docs/gcp_free_tier_constraints.json`, deployment docs, profile consistency tests |

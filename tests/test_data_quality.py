@@ -41,6 +41,29 @@ def test_quality_detects_duplicate_and_invalid_ohlc() -> None:
     assert "invalid_ohlc" in report.warnings
 
 
+def test_quality_detects_overlapping_candles() -> None:
+    now = datetime.now(tz=UTC)
+    first = _candle(1, now=now)
+    overlapping = Candle(
+        "binance",
+        "BTCUSDT",
+        "1m",
+        first.close_time_utc - timedelta(seconds=30),
+        first.close_time_utc + timedelta(seconds=30),
+        100,
+        101,
+        99,
+        100,
+        1,
+        100,
+    )
+
+    report = assess_candles([first, overlapping], "1m", now=now + timedelta(minutes=2))
+
+    assert report.status == "fail"
+    assert "overlapping_candles" in report.warnings
+
+
 def test_quality_flags_stale_data() -> None:
     now = datetime.now(tz=UTC)
     report = assess_candles([_candle(1, now=now)], "1m", now=now + timedelta(hours=2))

@@ -12,6 +12,8 @@ from crypto_signal_bot.signals.schemas import SignalCandidate
 
 UPSIDE_ALERT_SUPPRESSION_FLAGS = {
     "orderbook_unavailable",
+    "high_manipulation_risk",
+    "low_evidence_grade",
 }
 
 
